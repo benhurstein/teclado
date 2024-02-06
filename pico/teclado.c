@@ -151,11 +151,16 @@ void controller_keyReleased(Controller *self, Key *key);
 void controller_resetHoldTimeout(Controller *self);
 
 
+// local sequence of calls:
+//   newRaw -> calculateVal -> setVal -> valChanged
+//      if master, can call controller_keyPressed or controller_keyReleased
+//      if slave, sends val to master
+// when master receives new val from slave, calls setVal
 void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId);
 void key_newRaw(Key *self, uint16_t newRaw);
 void key_calculateVal(Key *self);
-void key_valChanged(Key *self);
 void key_setVal(Key *self, uint8_t newVal);
+void key_valChanged(Key *self);
 int8_t key_val(Key *self);
 void key_setReleaseAction(Key *self, Action action);
 void key_setTapAction(Key *self, Action action);
@@ -1024,24 +1029,31 @@ bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
   return false;
 }
 
+
 // Key
 // stores info about a key
 
-
 struct key {
   Controller *controller;
+  // low level id, depending on wiring, can be repeated on other side
   int8_t hwId;
+  // higher level id, O-17 for left (0=Q,1=W), 18-35 for right (18=Y,19=U)
   int8_t swId;
-  uint32_t minRaw;
-  uint32_t maxRaw;
-  uint32_t filteredRaw;
+  // last value read from sensor
   uint16_t newRaw;
   uint16_t minRawRange;
+  // scaled values, for filtering
+  uint32_t minRaw_S;
+  uint32_t maxRaw_S;
+  uint32_t filteredRaw_S;
+  // current state, a 0 to 9 value and a pressed state
   int8_t val;
-  int8_t lastVal;
-  int8_t minVal;///
-  int8_t maxVal;///
   bool pressed;
+  // minimum value since key was released and maximum value since key was pressed
+  //   a key press/release is recognized relative to these values
+  int8_t minVal;
+  int8_t maxVal;
+  // what to do when key is actuated
   Action tapAction;
   Action holdAction;
   Action releaseAction;
@@ -1054,15 +1066,12 @@ char *key_description(Key *self)
   return description;
 }
 
-//#define FILTER(old, new, weight) old = ((old-new)*(weight-1)/(weight)+new)
-#define FILTER(old, new, weight, scale) old = old + (new<<(scale-weight)) - (old>>weight)
-#define FILTER2(old, new, weight, scale) old = old + (new>>weight) - (old>>weight)
 void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId)
 {
   self->controller = controller;
   self->hwId = hwId;
   self->swId = swId;
-  self->filteredRaw = -1;
+  self->filteredRaw_S = UINT32_MAX;
   self->val = 0;
   self->pressed = false;
   self->minVal = 0;
@@ -1080,30 +1089,40 @@ void key_setMinRawRange(Key *self, uint16_t range)
   self->minRawRange = range;
 }
 
-
+static void filter_SS(uint32_t *old_S, uint32_t new_S, uint8_t weight)
+{
+  *old_S = *old_S + (new_S >> weight) - (*old_S >> weight);
+}
+static void filter_SnS(uint32_t *old_S, uint16_t new, uint8_t scale, uint8_t weight)
+{
+  filter_SS(old_S, ((uint32_t)new) << scale, weight);
+}
 void key__calculateAverages(Key *self)
 {
-  uint32_t t0=time_us_32();
-  if (self->filteredRaw == -1) {
-    self->filteredRaw = self->newRaw<<13;
-    self->maxRaw = self->filteredRaw;
-    self->minRaw = self->filteredRaw;
+  uint32_t t0 = time_us_32();
+  if (self->filteredRaw_S == UINT32_MAX) {
+    // if it's the first value, initialize
+    self->filteredRaw_S = self->newRaw << 13;
+    self->maxRaw_S = self->filteredRaw_S;
+    self->minRaw_S = self->filteredRaw_S;
     return;
   }
-  FILTER(self->filteredRaw, self->newRaw, 2, 13);
-  if (self->filteredRaw < self->minRaw) {
-    FILTER2(self->minRaw, self->filteredRaw, 1, 13);
-  } else if (self->filteredRaw > self->maxRaw) {
-    FILTER2(self->maxRaw, self->filteredRaw, 1, 13);
+  filter_SnS(&self->filteredRaw_S, self->newRaw, 13, 2);
+  // if value is outside of max or min limits, fast drift min or max to value
+  if (self->filteredRaw_S < self->minRaw_S) {
+    filter_SS(&self->minRaw_S, self->filteredRaw_S, 1);
+  } else if (self->filteredRaw_S > self->maxRaw_S) {
+    filter_SS(&self->maxRaw_S, self->filteredRaw_S, 1);
   } else {
-    uint32_t dist = (self->maxRaw - self->minRaw) / 3;
-    if ((self->filteredRaw - self->minRaw) < dist) {
-      FILTER2(self->minRaw, self->filteredRaw, 13, 13);
-    } else if ((self->maxRaw - self->filteredRaw) < dist) {
-      FILTER2(self->maxRaw, self->filteredRaw, 13, 13);
+    // if value is close to max or min, slowly drift min or max to value
+    uint32_t dist = (self->maxRaw_S - self->minRaw_S) / 3;
+    if ((self->filteredRaw_S - self->minRaw_S) < dist) {
+      filter_SS(&self->minRaw_S, self->filteredRaw_S, 13);
+    } else if ((self->maxRaw_S - self->filteredRaw_S) < dist) {
+      filter_SS(&self->maxRaw_S, self->filteredRaw_S, 13);
     }
   }
-  tca+=time_us_32()-t0;
+  tca += time_us_32() - t0;
 }
 
 
@@ -1119,18 +1138,20 @@ void key_valChanged(Key *self)
   log(LOG_K, "valChanged k%d v%d m%d M%d p%d", self->swId,
       newVal, self->minVal, self->maxVal, self->pressed);
   if (self->pressed) {
-    if (newVal > self->maxVal) self->maxVal = newVal;
-    if (self->maxVal - newVal >= SENSITIVITY) {
-      self->minVal = newVal;
+    if (newVal > self->maxVal) {
+      self->maxVal = newVal;
+    } else if (self->maxVal - newVal >= SENSITIVITY) {
       self->pressed = false;
       controller_keyReleased(self->controller, self);
+      self->minVal = newVal;
     }
   } else {
-    if (newVal < self->minVal) self->minVal = newVal;
-    if (newVal - self->minVal >= SENSITIVITY) {
-      self->maxVal = newVal;
+    if (newVal < self->minVal) {
+      self->minVal = newVal;
+    } else if (newVal - self->minVal >= SENSITIVITY) {
       self->pressed = true;
       controller_keyPressed(self->controller, self);
+      self->maxVal = newVal;
     }
   }
   log(LOG_K, "valChanged -> m%d M%d p%d", self->minVal, self->maxVal, self->pressed);
@@ -1168,31 +1189,31 @@ void key_setVal(Key *self, uint8_t newVal)
   }
 }
 
+static int constrain(int val, int minimum, int maximum)
+{
+  if (val < minimum) return minimum;
+  if (val > maximum) return maximum;
+  return val;
+}
+
 void key_calculateVal(Key *self)
 {
   key__calculateAverages(self);
   if (self->swId == -1) return;
-  int minRaw = self->minRaw >> 13;
-  int maxRaw = self->maxRaw >> 13;
+  int minRaw = self->minRaw_S >> 13;
+  int maxRaw = self->maxRaw_S >> 13;
   int rawRange = maxRaw - minRaw;
   int newRaw = self->newRaw;
   if (rawRange < self->minRawRange) return;
-  int val = (newRaw - minRaw) * 100 / rawRange;
-  //val = val*val/100;
-//  if (self->swId <= 17)
-//    val = 90 - val - 3;
-  if (val < 0) val = 0;
-  if (val > 90) val = 90;
-  if (abs(val - self->val*10) > 6) {
-    key_setVal(self, (val+5)/10);
+  int val_90 = constrain((newRaw - minRaw) * 100 / rawRange, 0, 90);
+  if (abs(val_90 - self->val * 10) > 6) {
+    key_setVal(self, (val_90 + 5) / 10);
   }
 }
 
 void key_newRaw(Key *self, uint16_t newRaw)
 {
   self->newRaw = newRaw;
-  //if (self->swId == -1) return;
-  //key_calculateVal(self);
 }
 
 
@@ -2048,15 +2069,15 @@ void log_keys(Key *keys)
       printf("%s ", mySide == leftSide ? "LEFT" : "RIGHT");
       printf("%f\n", ct/((t1-t0)/1e6));
       for (int i=0; i<20; i++) {
-        printf("%5u", keys[i].minRaw>>13);
+        printf("%5u", keys[i].minRaw_S >> 13);
       }
       putchar_raw('\n');
       for (int i=0; i<20; i++) {
-        printf("%5u", keys[i].maxRaw>>13);
+        printf("%5u", keys[i].maxRaw_S >> 13);
       }
       printf("\n");
       for (int i=0; i<20; i++) {
-        printf("%5u", (keys[i].maxRaw - keys[i].minRaw)>>13);
+        printf("%5u", (keys[i].maxRaw_S - keys[i].minRaw_S) >> 13);
       }
       printf("\n");
       for (int i=0; i<20; i++) {
