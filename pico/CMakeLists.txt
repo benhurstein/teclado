@@ -1,4 +1,4 @@
-cmake_minimum_required(VERSION 3.27)
+cmake_minimum_required(VERSION 3.13)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 include(pico_sdk_import.cmake)
 project(teclado_project C CXX ASM)
