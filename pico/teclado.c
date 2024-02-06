@@ -1116,21 +1116,24 @@ void key_valChanged(Key *self)
       uart_send_key_val(self->hwId, self->val);
     }
   }
-  bool wasPressed = self->pressed;
-  log(LOG_K, "valChanged k%d v%d m%d M%d p%d", self->swId, newVal, self->minVal, self->maxVal, wasPressed);
-  if (wasPressed && newVal > self->maxVal) self->maxVal = newVal;///
-  if (!wasPressed && newVal < self->minVal) self->minVal = newVal;///
-  if (!wasPressed && newVal-self->minVal >= SENSITIVITY) {self->maxVal = newVal; self->pressed = true;}///
-  if (wasPressed && self->maxVal-newVal >= SENSITIVITY) {self->minVal = newVal; self->pressed = false;}///
-  log(LOG_K, " -> m%d M%d p%d", self->minVal, self->maxVal, self->pressed);
-  ///if (newVal >= 2) self->pressed = true;
-  ///if (newVal <  1) self->pressed = false;
-  if (!wasPressed && self->pressed) {
-    controller_keyPressed(self->controller, self);
+  log(LOG_K, "valChanged k%d v%d m%d M%d p%d", self->swId,
+      newVal, self->minVal, self->maxVal, self->pressed);
+  if (self->pressed) {
+    if (newVal > self->maxVal) self->maxVal = newVal;
+    if (self->maxVal - newVal >= SENSITIVITY) {
+      self->minVal = newVal;
+      self->pressed = false;
+      controller_keyReleased(self->controller, self);
+    }
+  } else {
+    if (newVal < self->minVal) self->minVal = newVal;
+    if (newVal - self->minVal >= SENSITIVITY) {
+      self->maxVal = newVal;
+      self->pressed = true;
+      controller_keyPressed(self->controller, self);
+    }
   }
-  if (wasPressed && !self->pressed) {
-    controller_keyReleased(self->controller, self);
-  }
+  log(LOG_K, "valChanged -> m%d M%d p%d", self->minVal, self->maxVal, self->pressed);
 }
 
 int8_t key_val(Key *self)
