@@ -706,7 +706,6 @@ typedef struct {
       keycodeRelease,
       modifierPress,
       modifierRelease,
-      keyModPress,
     } command;
     uint8_t keycode;
     uint8_t modifier;
@@ -753,11 +752,6 @@ void keycodeq_insertModifierPress(Keycodeq *self, modifier_t modifier)
 void keycodeq_insertModifierRelease(Keycodeq *self, modifier_t modifier)
 {
   keycodeq_insertData(self, (struct kcq_data){modifierRelease, 0, modifier});
-}
-
-void keycodeq_insertKeyModPress(Keycodeq *self, keycode_t keycode, modifier_t modifier)
-{
-  keycodeq_insertData(self, (struct kcq_data){keyModPress, keycode, modifier});
 }
 
 enum command keycodeq_head(Keycodeq *self)
@@ -859,11 +853,6 @@ void usb_releaseKeycode(USB *self, keycode_t keycode)
   }
 }
 
-void usb_pressKeyMod(USB *self, keycode_t keycode, modifier_t modifier)
-{
-  keycodeq_insertKeyModPress(&self->keycodeq, keycode, modifier);
-}
-
 void usb_sendReport(USB *self)
 {
   if (mySide == leftSide) {
@@ -956,18 +945,6 @@ void usb__sendModifierReleases(USB *self)
   }
   usb_sendReport(self);
 }
-void usb__sendKeyModPress(USB *self)
-{
-  modifier_t save_mods = self->modifiers;
-  keycode_t keycode;
-  modifier_t modifier;
-  keycodeq_remove(&self->keycodeq, &keycode, &modifier);
-  self->modifiers &= ~(SHFT|RSHFT);
-  self->modifiers |= modifier;
-  usb__insertKeycode(self, keycode);
-  usb_sendReport(self);
-  self->modifiers = save_mods;
-}
 
 bool usb_isCapsLocked(USB *self)
 {
@@ -992,15 +969,10 @@ void usb_task(USB *self)
     case modifierRelease:
       usb__sendModifierReleases(self);
       break;
-    case keyModPress:
-      usb__sendKeyModPress(self);
-      break;
   }
 }
 
-
-
-
+  
 
 void uart_send_key_val(uint8_t keyId, uint8_t val)
 {
