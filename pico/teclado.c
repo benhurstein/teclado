@@ -1859,10 +1859,26 @@ typedef struct {
   #define N_ANA 4
   #define N_KEY (N_SEL*N_ANA)
   uint8_t sel_pin[N_SEL];  
-  uint16_t last_val[N_KEY];
-  Key *keys;
+  Key keys[N_KEY];
   keyboardSide side;
 } LocalReader;
+
+void init_keys(Key keys[N_KEY], keyboardSide side, Controller *controller)
+{
+  int8_t leftHwIdToSwId[N_KEY] = {
+    17, 14,  9,  4, 16, 13,  8,  3, 15, 12,
+     7,  2, -1, 11,  6,  1, -1, 10,  5,  0,
+  };
+  int8_t rightHwIdToSwId[N_KEY] = {
+    -1, 32, 27, 22, -1, 31, 26, 21, 34, 30,
+    25, 20, 35, 29, 24, 19, 33, 28, 23, 18,
+  };
+  int8_t *hwIdToSwId = side == leftSide ? leftHwIdToSwId : rightHwIdToSwId;
+  for (int k = 0; k < N_KEY; k++) {
+    key_init(&keys[k], controller, k, hwIdToSwId[k]);
+    key_setMinRawRange(&keys[k], 50);
+  }
+}
 
 void localReader__initADC(LocalReader *self)
 {
@@ -1906,6 +1922,7 @@ static keyboardSide readKeyboardSide()
   gpio_set_dir(3, GPIO_OUT);
   gpio_put(1, 0);
   gpio_put(3, 1);
+  sleep_us(10);
   keyboardSide side = gpio_get(2) ? leftSide : rightSide;
   gpio_deinit(2); 
   gpio_deinit(1); 
@@ -1917,38 +1934,26 @@ void localReader_initSide(LocalReader *self)
 {
   self->side = readKeyboardSide();
   if (self->side == leftSide) {
-    self->sel_pin[0] = 14;//6;
-    self->sel_pin[1] = 15;//7;
-    self->sel_pin[2] = 3;//8;
-    self->sel_pin[3] = 1;//14;
-    self->sel_pin[4] = 0;//15;
-    localReader__initGPIO(self);
-    for (int k=0; k < N_KEY; k++) {
-      key_setMinRawRange(&self->keys[k], 50);
-    }
+    self->sel_pin[0] = 14;
+    self->sel_pin[1] = 15;
+    self->sel_pin[2] = 3;
+    self->sel_pin[3] = 1;
+    self->sel_pin[4] = 0;
   } else {
-    self->side = rightSide;
-    self->sel_pin[0] = 0;//4;
-    self->sel_pin[1] = 1;//5;
-    self->sel_pin[2] = 3;//6;
-    self->sel_pin[3] = 6;//7;
-    self->sel_pin[4] = 7;//8;
-    localReader__initGPIO(self);
-    for (int k=0; k < N_KEY; k++) {
-      key_setMinRawRange(&self->keys[k], 50);
-    }
+    self->sel_pin[0] = 0;
+    self->sel_pin[1] = 1;
+    self->sel_pin[2] = 3;
+    self->sel_pin[3] = 6;
+    self->sel_pin[4] = 7;
   }
+  localReader__initGPIO(self);
 }
 
-LocalReader *localReader_create(Key *keys)
+void localReader_init(LocalReader *self, Controller *controller)
 {
-  LocalReader *self = calloc(sizeof *self, 1);
-  if (self != NULL) {
-    self->keys = keys;
     localReader__initADC(self);
     localReader_initSide(self);
-  }
-  return self;
+    init_keys(self->keys, self->side, controller);
 }
 
 keyboardSide localReader_keyboardSide(LocalReader *self)
@@ -1956,13 +1961,13 @@ keyboardSide localReader_keyboardSide(LocalReader *self)
   return self->side;
 }
 
+Key *localReader_keys(LocalReader *self)
+{
+  return self->keys;
+}
+
 void localReader_readKeys(LocalReader *self)
 {
-static bool imprimiu = false;
-static bool imprime = false;
-static uint16_t v[20000];
-static int n = 0;
-static bool liga = false;
   Key *key = &self->keys[0];
   for (int sel=0; sel < N_SEL; sel++) {
     uint pin = self->sel_pin[sel];
@@ -1970,33 +1975,14 @@ static bool liga = false;
     for (int ana=0; ana < N_ANA; ana++) {
       adc_select_input(ana);
       uint16_t raw = adc_read();
-//if (sel == 0 && ana == 0 && raw > 1350) liga = true;
-//if (liga && n < 20000) v[n++] = raw;
-//if (!imprimiu && sel == 4 && ana == 2 && raw > 1800) imprime = true;
       key_setNewRaw(key, raw);
       key++;
     }
     gpio_put(pin, 0);
     sleep_us(80);
   }
-if (imprime) {
-  static uint32_t t0 = 0;
-  if (time_us_32()-t0 < 20000) return; 
-  t0 = time_us_32();
-  static int i=0;
-  printf("\nRAW ");
-  while (i<20000) {
-    printf("%5d", v[i++]);
-    if (i%20 == 0) {
-      printf("\n");  
-      fflush(stdout);
-      return;
-    }
-  }
-  imprime = false;
-  imprimiu = true;
 }
-}
+
 void localReader_calculateKeys(LocalReader *self)
 {
   for (int k=0; k < N_KEY; k++) {
@@ -2030,28 +2016,6 @@ void remoteReader_readKeys(RemoteReader *self)
 }
 
 
-void init_keys(Key *lkeys, Key *rkeys, Controller *controller)
-{
-  int8_t leftHwIdToSwId[] = {
-    17, 14,  9,  4, 16, 13,  8,  3, 15, 12,
-     7,  2, -1, 11,  6,  1, -1, 10,  5,  0,
-//     0,  5, 10, -1,  1,  6, 11, -1,  2,  7,
-//    12, 15,  3,  8, 13, 16,  4,  9, 14, 17,
-  };
-  int8_t rightHwIdToSwId[] = {
-    -1, 32, 27, 22, -1, 31, 26, 21, 34, 30,
-    25, 20, 35, 29, 24, 19, 33, 28, 23, 18,
-//    18, 23, 28, 33, 19, 24, 29, 35, 20, 25,
-//    30, 34, 21, 26, 31, -1, 22, 27, 32, -1,
-//    28, 29, 23, 24, 21, 18, 20, 19, 31, 30,
-//    26, 25, 32, 27, 22, -1, 33, 35, 34, -1,
-  };
-  for (int k=0; k<N_KEY; k++) {
-    key_init(&lkeys[k], controller, k, leftHwIdToSwId[k]);
-    key_init(&rkeys[k], controller, k, rightHwIdToSwId[k]);
-  }
-}
-
 void log_keys(Key *keys)
 {
   static uint32_t t0 = 0;
@@ -2080,8 +2044,7 @@ void log_keys(Key *keys)
       }
       printf("\n");
       fflush(stdout);
-      t1 = time_us_32();
-      t0 = t1;
+      t0 = time_us_32();
       ct = 0;
     }
   }
@@ -2104,25 +2067,30 @@ int main()
 
   led_init();
 
-  Key localKeys[N_KEY], remoteKeys[N_KEY];
-  LocalReader *localReader = localReader_create(localKeys);
-  while (true) {
-    mySide = localReader_keyboardSide(localReader);
-    if (mySide != noSide) break;
-    localReader_initSide(localReader);
   }
+
+  Key remoteKeys[N_KEY];
+  LocalReader localReader;
+  localReader_init(&localReader, &controller);
+  mySide = localReader_keyboardSide(&localReader);
+  if (mySide == noSide) while (true) printf("side=%d FATAL\n", mySide);
   RemoteReader *remoteReader = remoteReader_create(remoteKeys);
 
+  Key *localKeys = localReader_keys(&localReader);
   Key *leftKeys  = (mySide == leftSide) ?  localKeys : remoteKeys;
   Key *rightKeys = (mySide == leftSide) ? remoteKeys : localKeys;
-  init_keys(leftKeys, rightKeys, &controller);
+  if (mySide == leftSide) {
+    init_keys(remoteKeys, rightSide, &controller);
+  } else {
+    init_keys(remoteKeys, leftSide, &controller);
+  }
 
   while (true) {
-    localReader_readKeys(localReader);
+    localReader_readKeys(&localReader);
     if (mySide == leftSide) {
       remoteReader_readKeys(remoteReader);
     }  
-    localReader_calculateKeys(localReader);
+    localReader_calculateKeys(&localReader);
     
     controller_task(&controller);
     usb_task(&usb);
