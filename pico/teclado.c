@@ -157,7 +157,7 @@ void controller_resetHoldTimeout(Controller *self);
 //      if slave, sends val to master
 // when master receives new val from slave, calls setVal
 void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId);
-void key_newRaw(Key *self, uint16_t newRaw);
+void key_setNewRaw(Key *self, uint16_t newRaw);
 void key_calculateVal(Key *self);
 void key_setVal(Key *self, uint8_t newVal);
 void key_valChanged(Key *self);
@@ -1138,17 +1138,15 @@ void key_valChanged(Key *self)
   log(LOG_K, "valChanged k%d v%d m%d M%d p%d", self->swId,
       newVal, self->minVal, self->maxVal, self->pressed);
   if (self->pressed) {
-    if (newVal > self->maxVal) {
-      self->maxVal = newVal;
-    } else if (self->maxVal - newVal >= SENSITIVITY) {
+    self->maxVal = MAX(self->maxVal, newVal);
+    if (self->maxVal - newVal >= SENSITIVITY) {
       self->pressed = false;
       controller_keyReleased(self->controller, self);
       self->minVal = newVal;
     }
   } else {
-    if (newVal < self->minVal) {
-      self->minVal = newVal;
-    } else if (newVal - self->minVal >= SENSITIVITY) {
+    self->minVal = MIN(self->minVal, newVal);
+    if (newVal - self->minVal >= SENSITIVITY) {
       self->pressed = true;
       controller_keyPressed(self->controller, self);
       self->maxVal = newVal;
@@ -1164,9 +1162,6 @@ int8_t key_val(Key *self)
 
 void key_setReleaseAction(Key *self, Action action)
 {
-  log(LOG_T, "setrel");
-  //log(LOG_K, "set release action: %s", action_description(action));
-  //log(LOG_T, "set release action: %s", action_description(action));
   self->releaseAction = action;
 }
 
@@ -1211,7 +1206,7 @@ void key_calculateVal(Key *self)
   }
 }
 
-void key_newRaw(Key *self, uint16_t newRaw)
+void key_setNewRaw(Key *self, uint16_t newRaw)
 {
   self->newRaw = newRaw;
 }
@@ -1978,7 +1973,7 @@ static bool liga = false;
 //if (sel == 0 && ana == 0 && raw > 1350) liga = true;
 //if (liga && n < 20000) v[n++] = raw;
 //if (!imprimiu && sel == 4 && ana == 2 && raw > 1800) imprime = true;
-      key_newRaw(key, raw);
+      key_setNewRaw(key, raw);
       key++;
     }
     gpio_put(pin, 0);
