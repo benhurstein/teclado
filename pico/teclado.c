@@ -37,7 +37,7 @@ uint32_t tca=0;
 #define LOG_K 0b01000000
 #define LOG_L 0b10000000
 
-uint8_t log_level = 0;//LOG_E | LOG_T | LOG_R;
+uint8_t log_level = LOG_L;//LOG_E | LOG_T | LOG_R;
 
 void log_set_level(uint8_t new_level)
 {
@@ -2016,17 +2016,20 @@ void remoteReader_readKeys(RemoteReader *self)
 }
 
 
+bool master;
+uint32_t tmaster;
 void log_keys(Key *keys)
 {
   static uint32_t t0 = 0;
-  static int ct = 0;
+  static uint16_t ct = 0;
 
   if ((log_level & LOG_L) != 0) {
     ct++;
     if (ct == 1000) {
       uint32_t t1 = time_us_32();
       printf("%s ", mySide == leftSide ? "LEFT" : "RIGHT");
-      printf("%f\n", ct/((t1-t0)/1e6));
+      printf("%uHz ", ct * 1000000u / (t1 - t0));
+      printf("%d%dusb %u\n", master, tud_connected(), tmaster);
       for (int i=0; i<20; i++) {
         printf("%5u", keys[i].minRaw_S >> 13);
       }
@@ -2053,6 +2056,7 @@ void log_keys(Key *keys)
 int main()
 {
   board_init();
+  uint32_t t0 = time_us_32();
   tusb_init();
   stdio_init_all();
   stdio_set_translate_crlf(&stdio_usb, false);
@@ -2067,6 +2071,11 @@ int main()
 
   led_init();
 
+  tmaster = 0;
+  while (!master && tmaster < 1000000) {
+    tud_task();
+    master = tud_connected();
+    tmaster = time_us_32() - t0; 
   }
 
   Key remoteKeys[N_KEY];
