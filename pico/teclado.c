@@ -57,6 +57,7 @@ void log_set_level(uint8_t new_level)
 
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
 keyboardSide mySide = noSide;
+keyboardSide usbSide = noSide;
 
 typedef enum {
   COLEMAK,
@@ -860,7 +861,7 @@ void usb_releaseKeycode(USB *self, keycode_t keycode)
 
 void usb_sendReport(USB *self)
 {
-  if (mySide == leftSide) {
+  if (mySide == usbSide) {
     log(LOG_R, "send report %02x %02x.%02x.%02x.%02x.%02x.%02x",
         self->modifiers,
         self->keycodes[0], self->keycodes[1], self->keycodes[2],
@@ -872,7 +873,7 @@ void usb_sendReport(USB *self)
 void usb_sendMouseReport(USB *self, uint8_t buttons, int8_t v, int8_t h, int8_t wv, int8_t wh)
 {
   // buttons, x, y, scroll, pan
-  if (mySide == leftSide) {
+  if (mySide == usbSide) {
     log(LOG_U, "usb mouse: B%x ^%d >%d %d %d", buttons, v, h, wv, wh);
     tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, h, v, wv, wh);
   }
@@ -1130,13 +1131,12 @@ void key_valChanged(Key *self)
 {
   uint8_t newVal = self->val;
   if (self->swId == -1) return;
-  if (key_side(self) == mySide) {
-    if (mySide == rightSide) {
-      uart_send_key_val(self->hwId, self->val);
-    }
-  }
   log(LOG_K, "valChanged k%d v%d m%d M%d p%d", self->swId,
       newVal, self->minVal, self->maxVal, self->pressed);
+  if (key_side(self) == mySide && mySide != usbSide) {
+    uart_send_key_val(self->hwId, self->val);
+    return;
+  }
   if (self->pressed) {
     self->maxVal = MAX(self->maxVal, newVal);
     if (self->maxVal - newVal >= SENSITIVITY) {
@@ -1951,9 +1951,9 @@ void localReader_initSide(LocalReader *self)
 
 void localReader_init(LocalReader *self, Controller *controller)
 {
-    localReader__initADC(self);
-    localReader_initSide(self);
-    init_keys(self->keys, self->side, controller);
+  localReader__initADC(self);
+  localReader_initSide(self);
+  init_keys(self->keys, self->side, controller);
 }
 
 keyboardSide localReader_keyboardSide(LocalReader *self)
@@ -1992,16 +1992,12 @@ void localReader_calculateKeys(LocalReader *self)
 
 
 typedef struct {
-  Key *keys;
+  Key keys[N_KEY];
 } RemoteReader;
 
-RemoteReader *remoteReader_create(Key *keys)
+void remoteReader_init(RemoteReader *self, Controller *controller, keyboardSide side)
 {
-  RemoteReader *self = calloc(sizeof *self, 1);
-  if (self != NULL) {
-    self->keys = keys;
-  }
-  return self;
+  init_keys(self->keys, side, controller);
 }
 
 void remoteReader_readKeys(RemoteReader *self)
@@ -2027,7 +2023,7 @@ void log_keys(Key *keys)
     ct++;
     if (ct == 1000) {
       uint32_t t1 = time_us_32();
-      printf("%s ", mySide == leftSide ? "LEFT" : "RIGHT");
+      printf("%s(%d) ", mySide == leftSide ? "LEFT" : "RIGHT", mySide == usbSide);
       printf("%uHz ", ct * 1000000u / (t1 - t0));
       printf("%d%dusb %u\n", master, tud_connected(), tmaster);
       for (int i=0; i<20; i++) {
@@ -2083,30 +2079,29 @@ int main()
   localReader_init(&localReader, &controller);
   mySide = localReader_keyboardSide(&localReader);
   if (mySide == noSide) while (true) printf("side=%d FATAL\n", mySide);
-  RemoteReader *remoteReader = remoteReader_create(remoteKeys);
 
-  Key *localKeys = localReader_keys(&localReader);
-  Key *leftKeys  = (mySide == leftSide) ?  localKeys : remoteKeys;
-  Key *rightKeys = (mySide == leftSide) ? remoteKeys : localKeys;
-  if (mySide == leftSide) {
-    init_keys(remoteKeys, rightSide, &controller);
+  keyboardSide otherSide = mySide == leftSide ? rightSide : leftSide;
+  if (master) {
+    usbSide = mySide;
   } else {
-    init_keys(remoteKeys, leftSide, &controller);
+    usbSide = otherSide;
   }
+
+  RemoteReader remoteReader;
+  remoteReader_init(&remoteReader, &controller, otherSide);
 
   while (true) {
     localReader_readKeys(&localReader);
-    if (mySide == leftSide) {
-      remoteReader_readKeys(remoteReader);
-    }  
     localReader_calculateKeys(&localReader);
-    
-    controller_task(&controller);
-    usb_task(&usb);
-    tud_task();
-    //hid_task();
+    if (mySide == usbSide) {
+      remoteReader_readKeys(&remoteReader);
+      controller_task(&controller);
+      usb_task(&usb);
+      tud_task();
+      //hid_task();
+    }  
 
-    log_keys(localKeys);
+    log_keys(localReader_keys(&localReader));
   }
   return 0;
 }
