@@ -25,7 +25,7 @@
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
 
-uint32_t tca=0;
+
 // log
 
 #define LOG_E 0b00000001
@@ -57,6 +57,7 @@ void log_set_level(uint8_t new_level)
 
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
 keyboardSide mySide = noSide;
+keyboardSide otherSide = noSide;
 keyboardSide usbSide = noSide;
 
 typedef enum {
@@ -161,7 +162,6 @@ void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId);
 void key_setNewRaw(Key *self, uint16_t newRaw);
 void key_calculateVal(Key *self);
 void key_setVal(Key *self, uint8_t newVal);
-void key_valChanged(Key *self);
 int8_t key_val(Key *self);
 void key_setReleaseAction(Key *self, Action action);
 void key_setTapAction(Key *self, Action action);
@@ -814,6 +814,33 @@ void usb_init(USB *self)
   memset(self->keycodes, 0, 6);
   self->buttons = 0;
   self->capsLocked = false;
+
+  tusb_init();
+}
+
+void uart_send_usb_side()
+{
+  uart_putc_raw(UART_ID, 'M');
+}
+
+bool uart_receive_usb_side()
+{
+  if (!uart_is_readable(UART_ID)) return false;
+  uint8_t c = uart_getc(UART_ID);
+  if (c == 'M') return true;
+  return false;
+}
+
+void usb_testConnection(USB *self)
+{
+  tud_task();
+  if (usbSide != noSide) return;
+  if (tud_connected()) {
+    usbSide = mySide;
+    uart_send_usb_side();
+  } else if (uart_receive_usb_side()) {
+    usbSide = otherSide;
+  }
 }
 
 void USB_caps(bool locked)
@@ -959,6 +986,8 @@ bool usb_isCapsLocked(USB *self)
 
 void usb_task(USB *self)
 {
+  tud_task();
+  //hid_task();
   if (!tud_hid_ready()) return;
   switch (keycodeq_head(&self->keycodeq)) {
     case none:
@@ -1098,9 +1127,8 @@ static void filter_SnS(uint32_t *old_S, uint16_t new, uint8_t scale, uint8_t wei
 {
   filter_SS(old_S, ((uint32_t)new) << scale, weight);
 }
-void key__calculateAverages(Key *self)
+void key__filterRawValues(Key *self)
 {
-  uint32_t t0 = time_us_32();
   if (self->filteredRaw_S == UINT32_MAX) {
     // if it's the first value, initialize
     self->filteredRaw_S = self->newRaw << 13;
@@ -1123,20 +1151,18 @@ void key__calculateAverages(Key *self)
       filter_SS(&self->maxRaw_S, self->filteredRaw_S, 13);
     }
   }
-  tca += time_us_32() - t0;
 }
 
 
-void key_valChanged(Key *self)
+void key__valChanged(Key *self)
 {
   uint8_t newVal = self->val;
   if (self->swId == -1) return;
-  log(LOG_K, "valChanged k%d v%d m%d M%d p%d", self->swId,
-      newVal, self->minVal, self->maxVal, self->pressed);
   if (key_side(self) == mySide && mySide != usbSide) {
     uart_send_key_val(self->hwId, self->val);
     return;
   }
+
   if (self->pressed) {
     self->maxVal = MAX(self->maxVal, newVal);
     if (self->maxVal - newVal >= SENSITIVITY) {
@@ -1180,7 +1206,7 @@ void key_setVal(Key *self, uint8_t newVal)
   if (newVal != self->val) {
     log(LOG_K, "newVal %d %d->%d", self->swId, self->val, newVal);
     self->val = newVal;
-    key_valChanged(self);
+    key__valChanged(self);
   }
 }
 
@@ -1193,7 +1219,7 @@ static int constrain(int val, int minimum, int maximum)
 
 void key_calculateVal(Key *self)
 {
-  key__calculateAverages(self);
+  key__filterRawValues(self);
   if (self->swId == -1) return;
   int minRaw = self->minRaw_S >> 13;
   int maxRaw = self->maxRaw_S >> 13;
@@ -1981,10 +2007,6 @@ void localReader_readKeys(LocalReader *self)
     gpio_put(pin, 0);
     sleep_us(80);
   }
-}
-
-void localReader_calculateKeys(LocalReader *self)
-{
   for (int k=0; k < N_KEY; k++) {
     key_calculateVal(&self->keys[k]);
   }
@@ -2012,8 +2034,6 @@ void remoteReader_readKeys(RemoteReader *self)
 }
 
 
-bool master;
-uint32_t tmaster;
 void log_keys(Key *keys)
 {
   static uint32_t t0 = 0;
@@ -2024,8 +2044,7 @@ void log_keys(Key *keys)
     if (ct == 1000) {
       uint32_t t1 = time_us_32();
       printf("%s(%d) ", mySide == leftSide ? "LEFT" : "RIGHT", mySide == usbSide);
-      printf("%uHz ", ct * 1000000u / (t1 - t0));
-      printf("%d%dusb %u\n", master, tud_connected(), tmaster);
+      printf("%uHz\n", ct * 1000000u / (t1 - t0));
       for (int i=0; i<20; i++) {
         printf("%5u", keys[i].minRaw_S >> 13);
       }
@@ -2049,56 +2068,59 @@ void log_keys(Key *keys)
   }
 }
 
-int main()
+void fatal(char *msg)
+{
+  while (true) {
+    printf("FATAL ERROR: %s\n", msg);
+    led_set_rgb(100, 0, 0);
+    sleep_ms(500);
+    led_set_rgb(0, 0, 0);
+    sleep_ms(500);
+  }
+}
+
+void hardware_init()
 {
   board_init();
-  uint32_t t0 = time_us_32();
-  tusb_init();
   stdio_init_all();
   stdio_set_translate_crlf(&stdio_usb, false);
-  USB usb;
-  usb_init(&usb);
-  Controller controller;
-  controller_init(&controller, &usb);
 
   uart_init(UART_ID, BAUD_RATE);
   gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
   gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
   led_init();
+}
 
-  tmaster = 0;
-  while (!master && tmaster < 1000000) {
-    tud_task();
-    master = tud_connected();
-    tmaster = time_us_32() - t0; 
-  }
-
-  Key remoteKeys[N_KEY];
+int main()
+{
+  USB usb;
+  Controller controller;
   LocalReader localReader;
+  RemoteReader remoteReader;
+
+  hardware_init();
+  usb_init(&usb);
+  controller_init(&controller, &usb);
+
   localReader_init(&localReader, &controller);
   mySide = localReader_keyboardSide(&localReader);
-  if (mySide == noSide) while (true) printf("side=%d FATAL\n", mySide);
-
-  keyboardSide otherSide = mySide == leftSide ? rightSide : leftSide;
-  if (master) {
-    usbSide = mySide;
-  } else {
-    usbSide = otherSide;
-  }
-
-  RemoteReader remoteReader;
+  if (mySide == noSide) fatal("Cannot determine keyboard side");
+  otherSide = mySide == leftSide ? rightSide : leftSide;
   remoteReader_init(&remoteReader, &controller, otherSide);
+
+  uint32_t t0 = time_us_32();
+  while (usbSide == noSide && time_us_32() - t0 < 1000000) {
+    usb_testConnection(&usb);
+  }
+  if (usbSide == noSide) fatal("Did not detect USB connection");
 
   while (true) {
     localReader_readKeys(&localReader);
-    localReader_calculateKeys(&localReader);
     if (mySide == usbSide) {
       remoteReader_readKeys(&remoteReader);
       controller_task(&controller);
       usb_task(&usb);
-      tud_task();
-      //hid_task();
     }  
 
     log_keys(localReader_keys(&localReader));
