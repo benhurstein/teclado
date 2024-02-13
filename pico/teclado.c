@@ -159,14 +159,16 @@ void controller_resetHoldTimeout(Controller *self);
 //      if slave, sends val to master
 // when master receives new val from slave, calls setVal
 void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId);
+int8_t key_id(Key *self);
+keyboardSide key_side(Key *self);
 void key_setNewRaw(Key *self, uint16_t newRaw);
 void key_calculateVal(Key *self);
 void key_setVal(Key *self, uint8_t newVal);
 int8_t key_val(Key *self);
 void key_setReleaseAction(Key *self, Action action);
-void key_setTapAction(Key *self, Action action);
-void key_setHoldAction(Key *self, Action action);
+Action *key_releaseAction(Key *self);
 char *key_description(Key *self);
+void key_setMinRawRange(Key *self, uint16_t range);
 
 Action Action_noAction(void);
 bool action_isNoAction(Action action);
@@ -459,7 +461,6 @@ bool action_isNoAction(Action action)
   return action.action_type == no_action;
 }
 
-char *key_description(Key *self);
 #define ACTION_CASE(action) case action##_action: action##_actuate(self, key, controller); break
 void action_actuate(Action *self, Key *key, Controller *controller)
 {
@@ -1084,8 +1085,6 @@ struct key {
   int8_t minVal;
   int8_t maxVal;
   // what to do when key is actuated
-  Action tapAction;
-  Action holdAction;
   Action releaseAction;
 };
 
@@ -1105,6 +1104,11 @@ void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId)
   self->val = 0;
   self->pressed = false;
   self->minVal = 0;
+}
+
+int8_t key_id(Key *self)
+{
+  return self->swId;
 }
 
 keyboardSide key_side(Key *self)
@@ -1191,14 +1195,9 @@ void key_setReleaseAction(Key *self, Action action)
   self->releaseAction = action;
 }
 
-void key_setTapAction(Key *self, Action action)
+Action *key_releaseAction(Key *self)
 {
-  self->tapAction = action;
-}
-
-void key_setHoldAction(Key *self, Action action)
-{
-  self->holdAction = action;
+  return &self->releaseAction;
 }
 
 void key_setVal(Key *self, uint8_t newVal)
@@ -1278,7 +1277,7 @@ void keyList_print(KeyList *self)
 {
   printf("[");
   for (KeyListNode *node = self->first; node != NULL; node = node->next) {
-    printf("%p(%d) ", node->key, node->key->swId);
+    printf("%s ", key_description(node->key));
   }
   printf("]\n");
 }
@@ -1576,8 +1575,8 @@ layer_id_t controller_baseLayer(Controller *self)
 
 void controller__pressKey(Controller *self, Key *key)
 {
-  Action action = layer[self->currentLayer][key->swId];
   log(LOG_T, "pressKey %s %s", key_description(key), action_description(action));
+  Action action = layer[self->currentLayer][key_id(key)];
   key_setReleaseAction(key, Action_noAction()); // just in case...
   if (key_side(key) == self->holdSide) {
     if (action_isTypingAction(&action)) {
@@ -1596,24 +1595,24 @@ void controller__pressKey(Controller *self, Key *key)
 
 void controller__releaseKey(Controller *self, Key *key)
 {
-  log(LOG_T, "releaseKey %d %s", key->swId, action_description(key->releaseAction));
+  log(LOG_T, "releaseKey %s %s", key_description(key), action_description(key_releaseAction(key)));
   keyList_removeKey(self->keysBeingHeld, key);
   if (keyList_empty(self->keysBeingHeld)) {
     self->holdSide = noSide;
   }
-  action_actuate(&(key->releaseAction), key, self);
+  action_actuate(key_releaseAction(key), key, self);
   key_setReleaseAction(key, Action_noAction());
 }
 
 void controller_keyPressed(Controller *self, Key *key)
 {
-  log(LOG_T, "keyPressed: %d", key->swId);
+  log(LOG_T, "keyPressed: %s", key_description(key));
   if (!keyList_empty(self->keysOnHold)) {
     log(LOG_T, " on hold2");
     keyList_insertKey(self->keysOnHold, key);
     controller_resetHoldTimeout(self);
   } else {
-    Action *action = &layer[self->currentLayer][key->swId];
+    Action *action = &layer[self->currentLayer][key_id(key)];
     if (action_holdType(action) == noHoldType) {
       log(LOG_T, " press action: %s", action_description(*action));
       controller__pressKey(self, key);
@@ -1650,18 +1649,18 @@ void controller_keyReleased(Controller *self, Key *key)
 {
   Action delayedAction = self->delayedReleaseAction;
   self->delayedReleaseAction = Action_noAction();
-  log(LOG_T, "keyReleased: %d", key->swId);
+  log(LOG_T, "keyReleased: %s", key_description(key));
   if (keyList_containsKey(self->keysOnHold, key)) {
     log(LOG_T, " was on hold");
     Key *firstKey = keyList_firstKey(self->keysOnHold);
     if (firstKey == key) { // it's a tap
-      log(LOG_T, " it's a tap (key %d)", key->swId);
+      log(LOG_T, " it's a tap (%s)", key_description(key));
       keyList_removeFirstKey(self->keysOnHold);
       controller__pressKey(self, key);
       controller__releaseKey(self, key);
       controller_resetHoldTimeout(self);
     } else { // it's a hold
-      log(LOG_T, " it's a hold (key %d, first %d)", key->swId, firstKey->swId);
+      log(LOG_T, " it's a hold (%s, first %s)", key_description(key), key_description(firstKey));
       controller_holdKeysOnHoldUntilKey(self, key);
       controller__releaseKey(self, key);
       controller_resetHoldTimeout(self);
@@ -1883,26 +1882,27 @@ void controller_task(Controller *self)
 typedef struct {
   #define N_SEL 5
   #define N_ANA 4
-  #define N_KEY (N_SEL*N_ANA)
-  uint8_t sel_pin[N_SEL];  
-  Key keys[N_KEY];
+  #define N_HWKEY (N_SEL*N_ANA)
+  uint8_t sel_pin[N_SEL];
+  Key keys[N_HWKEY];
   keyboardSide side;
 } LocalReader;
 
-void init_keys(Key keys[N_KEY], keyboardSide side, Controller *controller)
+void init_keys(Key keys[N_HWKEY], keyboardSide side, Controller *controller)
 {
-  int8_t leftHwIdToSwId[N_KEY] = {
+  int8_t leftHwIdToSwId[N_HWKEY] = {
     17, 14,  9,  4, 16, 13,  8,  3, 15, 12,
      7,  2, -1, 11,  6,  1, -1, 10,  5,  0,
   };
-  int8_t rightHwIdToSwId[N_KEY] = {
+  int8_t rightHwIdToSwId[N_HWKEY] = {
     -1, 32, 27, 22, -1, 31, 26, 21, 34, 30,
     25, 20, 35, 29, 24, 19, 33, 28, 23, 18,
   };
   int8_t *hwIdToSwId = side == leftSide ? leftHwIdToSwId : rightHwIdToSwId;
-  for (int k = 0; k < N_KEY; k++) {
-    key_init(&keys[k], controller, k, hwIdToSwId[k]);
-    key_setMinRawRange(&keys[k], 50);
+  for (int8_t hwId = 0; hwId < N_HWKEY; hwId++) {
+    int8_t swId = hwIdToSwId[hwId];
+    key_init(&keys[hwId], controller, hwId, swId);
+    key_setMinRawRange(&keys[hwId], 50);
   }
 }
 
@@ -1994,6 +1994,7 @@ Key *localReader_keys(LocalReader *self)
 
 void localReader_readKeys(LocalReader *self)
 {
+  uint8_t keyId = 0;
   Key *key = &self->keys[0];
   for (int sel=0; sel < N_SEL; sel++) {
     uint pin = self->sel_pin[sel];
@@ -2001,20 +2002,20 @@ void localReader_readKeys(LocalReader *self)
     for (int ana=0; ana < N_ANA; ana++) {
       adc_select_input(ana);
       uint16_t raw = adc_read();
-      key_setNewRaw(key, raw);
-      key++;
+      key_setNewRaw(&self->keys[keyId], raw);
+      keyId++;
     }
     gpio_put(pin, 0);
     sleep_us(80);
   }
-  for (int k=0; k < N_KEY; k++) {
-    key_calculateVal(&self->keys[k]);
+  for (keyId=0; keyId < N_HWKEY; keyId++) {
+    key_calculateVal(&self->keys[keyId]);
   }
 }
 
 
 typedef struct {
-  Key keys[N_KEY];
+  Key keys[N_HWKEY];
 } RemoteReader;
 
 void remoteReader_init(RemoteReader *self, Controller *controller, keyboardSide side)
@@ -2045,19 +2046,19 @@ void log_keys(Key *keys)
       uint32_t t1 = time_us_32();
       printf("%s(%d) ", mySide == leftSide ? "LEFT" : "RIGHT", mySide == usbSide);
       printf("%uHz\n", ct * 1000000u / (t1 - t0));
-      for (int i=0; i<20; i++) {
+      for (int i = 0; i < N_HWKEY; i++) {
         printf("%5u", keys[i].minRaw_S >> 13);
       }
       putchar_raw('\n');
-      for (int i=0; i<20; i++) {
+      for (int i = 0; i < N_HWKEY; i++) {
         printf("%5u", keys[i].maxRaw_S >> 13);
       }
       printf("\n");
-      for (int i=0; i<20; i++) {
+      for (int i = 0; i < N_HWKEY; i++) {
         printf("%5u", (keys[i].maxRaw_S - keys[i].minRaw_S) >> 13);
       }
       printf("\n");
-      for (int i=0; i<20; i++) {
+      for (int i = 0; i < N_HWKEY; i++) {
         printf("%5u", keys[i].newRaw);
       }
       printf("\n");
@@ -2121,7 +2122,7 @@ int main()
       remoteReader_readKeys(&remoteReader);
       controller_task(&controller);
       usb_task(&usb);
-    }  
+    }
 
     log_keys(localReader_keys(&localReader));
   }
