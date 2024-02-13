@@ -1,4 +1,4 @@
-
+// includes  {{{1
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -8,52 +8,19 @@
 #include "hardware/adc.h"
 #include "hardware/uart.h"
 #include "pico/bootrom.h"
-//#include "hardware/irq.h"
 #include "ws2812.pio.h"
 
 #include "bsp/board.h"
 #include "tusb.h"
 #include "usb_descriptors.h"
 
+// constants+types+globals  {{{1
 #define SENSITIVITY 6
 
 #define UART_ID uart1
 #define BAUD_RATE 500000
-
-// We are using pins 0 and 1, but see the GPIO function select table in the
-// datasheet for information on which other pins can be used.
 #define UART_TX_PIN 4
 #define UART_RX_PIN 5
-
-
-// log
-
-#define LOG_E 0b00000001
-#define LOG_I 0b00000010
-#define LOG_R 0b00000100
-#define LOG_U 0b00001000
-#define LOG_C 0b00010000
-#define LOG_T 0b00100000
-#define LOG_K 0b01000000
-#define LOG_L 0b10000000
-
-uint8_t log_level = LOG_L;//LOG_E | LOG_T | LOG_R;
-
-void log_set_level(uint8_t new_level)
-{
-  log_level = new_level;
-}
-
-#define log(level, ...) \
-    if ((level & log_level)) { \
-      printf(__VA_ARGS__); \
-      putchar_raw('\n'); \
-      fflush(stdout); \
-      sleep_us(200); \
-      tud_task(); \
-    }
-
-//
 
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
 keyboardSide mySide = noSide;
@@ -74,14 +41,14 @@ typedef enum {
   NO_LAYER,
 } layer_id_t;
 
-typedef enum { 
+typedef enum {
   CTRL  = 0b00000001,
-  SHFT  = 0b00000010, 
-  ALT   = 0b00000100, 
-  GUI   = 0b00001000, 
-  RCTRL = 0b00010000, 
-  RSHFT = 0b00100000, 
-  RALT  = 0b01000000, 
+  SHFT  = 0b00000010,
+  ALT   = 0b00000100,
+  GUI   = 0b00001000,
+  RCTRL = 0b00010000,
+  RSHFT = 0b00100000,
+  RALT  = 0b01000000,
   RGUI  = 0b10000000,
 } modifier_t;
 
@@ -127,10 +94,51 @@ typedef enum {
     but_forward  = 0b10000,
 } button_t;
 
+// ascii to mod-key  {{{1
+const struct mod_key { modifier_t mod; keycode_t key; } ascii_to_mod_key[] = {
+  [0x00] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
+  [0x04] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
+  [0x08] = {0,    K_BS      }, {0,    K_TAB   }, {0,    K_ENT   }, {0,    0       },
+  [0x0C] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
+  [0x10] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
+  [0x14] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
+  [0x18] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    K_ESC   },
+  [0x1C] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
+  [0x20] = {0,    K_SPC     }, {SHFT, K_1     }, {SHFT, K_APOSTR}, {SHFT, K_3     },// !"#
+  [0x24] = {SHFT, K_4       }, {SHFT, K_5     }, {SHFT, K_7     }, {0,    K_APOSTR},//$%&'
+  [0x28] = {SHFT, K_9       }, {SHFT, K_0     }, {SHFT, K_8     }, {SHFT, K_EQUAL },//()*+
+  [0x2C] = {0,    K_COMMA   }, {0,    K_MINUS }, {0,    K_DOT   }, {0,    K_SLASH },//,-./
+  [0x30] = {0,    K_0       }, {0,    K_1     }, {0,    K_2     }, {0,    K_3     },//0123
+  [0x34] = {0,    K_4       }, {0,    K_5     }, {0,    K_6     }, {0,    K_7     },//4567
+  [0x38] = {0,    K_8       }, {0,    K_9     }, {SHFT, K_SMCOL }, {0,    K_SMCOL },//89:;
+  [0x3C] = {SHFT, K_COMMA   }, {0,    K_EQUAL }, {SHFT, K_DOT   }, {SHFT, K_SLASH },//<=>?
+  [0x40] = {SHFT, K_2       }, {SHFT, K_A     }, {SHFT, K_B     }, {SHFT, K_C     },//@ABC
+  [0x44] = {SHFT, K_D       }, {SHFT, K_E     }, {SHFT, K_F     }, {SHFT, K_G     },//DEFG
+  [0x48] = {SHFT, K_H       }, {SHFT, K_I     }, {SHFT, K_J     }, {SHFT, K_K     },//HIJK
+  [0x4C] = {SHFT, K_L       }, {SHFT, K_M     }, {SHFT, K_N     }, {SHFT, K_O     },//LMNO
+  [0x50] = {SHFT, K_P       }, {SHFT, K_Q     }, {SHFT, K_R     }, {SHFT, K_S     },//PQRS
+  [0x54] = {SHFT, K_T       }, {SHFT, K_U     }, {SHFT, K_V     }, {SHFT, K_W     },//TUVW
+  [0x58] = {SHFT, K_X       }, {SHFT, K_Y     }, {SHFT, K_Z     }, {0,    K_LBRAKT},//XYZ[
+  [0x5C] = {0,    K_BKSLASH }, {0,    K_RBRAKT}, {SHFT, K_6     }, {SHFT, K_MINUS },//\]^_
+  [0x60] = {0,    K_GRAVE   }, {0,    K_A     }, {0,    K_B     }, {0,    K_C     },//`abc
+  [0x64] = {0,    K_D       }, {0,    K_E     }, {0,    K_F     }, {0,    K_G     },//defg
+  [0x68] = {0,    K_H       }, {0,    K_I     }, {0,    K_J     }, {0,    K_K     },//hijk
+  [0x6C] = {0,    K_L       }, {0,    K_M     }, {0,    K_N     }, {0,    K_O     },//lmno
+  [0x70] = {0,    K_P       }, {0,    K_Q     }, {0,    K_R     }, {0,    K_S     },//pqrs
+  [0x74] = {0,    K_T       }, {0,    K_U     }, {0,    K_V     }, {0,    K_W     },//tuvw
+  [0x78] = {0,    K_X       }, {0,    K_Y     }, {0,    K_Z     }, {SHFT, K_LBRAKT},//xyz{
+  [0x7C] = {SHFT, K_BKSLASH }, {SHFT, K_RBRAKT}, {SHFT, K_GRAVE }, {0,    K_DEL   },//|}~
+};
+
+
+// definitions  {{{1
 typedef struct controller Controller;
 typedef struct key Key;
 typedef struct action Action;
+typedef struct usb USB;
 
+void controller_init(Controller *self, USB *usb);
+void controller_task(Controller *self);
 void controller_changeBaseLayer(Controller *self, layer_id_t layer);
 layer_id_t controller_baseLayer(Controller *self);
 void controller_pressKeycode(Controller *self, keycode_t keycode);
@@ -150,7 +158,6 @@ void controller_doCommand(Controller *self, int command);
 void controller_setTimedAction(Controller *self, Key *key, Action action, int interval_ms);
 void controller_keyPressed(Controller *self, Key *key);
 void controller_keyReleased(Controller *self, Key *key);
-void controller_resetHoldTimeout(Controller *self);
 
 
 // local sequence of calls:
@@ -170,12 +177,48 @@ Action *key_releaseAction(Key *self);
 char *key_description(Key *self);
 void key_setMinRawRange(Key *self, uint16_t range);
 
+enum holdType { noHoldType, modHoldType, layerHoldType };
 Action Action_noAction(void);
-bool action_isNoAction(Action action);
+char *action_description(Action *a);
 void action_actuate(Action *self, Key *key, Controller *controller);
+bool action_isTypingAction(Action *self);
+Action action_holdAction(Action *self);
+Action action_tapAction(Action *self);
+enum holdType action_holdType(Action *self);
 
 
-typedef enum { 
+// log  {{{1
+
+#define LOG_E 0b00000001
+#define LOG_I 0b00000010
+#define LOG_R 0b00000100
+#define LOG_U 0b00001000
+#define LOG_C 0b00010000
+#define LOG_T 0b00100000
+#define LOG_K 0b01000000
+#define LOG_L 0b10000000
+
+uint8_t log_level = LOG_L;//LOG_E | LOG_T | LOG_R;
+
+void log_set_level(uint8_t new_level)
+{
+  log_level = new_level;
+}
+
+#define log(level, ...) \
+    if ((level & log_level)) { \
+      printf(__VA_ARGS__); \
+      putchar_raw('\n'); \
+      fflush(stdout); \
+      sleep_us(200); \
+      tud_task(); \
+    }
+
+//
+
+// Action  {{{1
+// all things that can happen when a key is pressed or released
+typedef enum {
   no_action,
   key_action,
   asc_action,
@@ -202,6 +245,7 @@ typedef enum {
   rel_button_action,
 } action_type_t;
 
+// names for those actions (for debug messages)
 char *action_name[] = {
   [no_action] = "no",
   [key_action] = "key",
@@ -229,6 +273,7 @@ char *action_name[] = {
   [rel_button_action] = "rel_button",
 };
 
+// extra data for each action
 typedef struct {
   keycode_t keycode;
 } key_action_t;
@@ -302,70 +347,65 @@ struct action {
   };
 };
 
-char *action_description(Action a)
+// key actions
+// do nothing
+#define NO_ACTION  (Action){ no_action }
+// send a keycode
+#define KEY(k)     (Action){ key_action,          .key = k }
+// send the keycode corresponding to ascii char (different if shifted)
+#define ASC(u,s)   (Action){ asc_action,          .asc = { u, s } }
+// send sequence of keycodes to type utf8 string
+#define STR(s)     (Action){ str_action,          .str = { s } }
+// send modifiers
+#define MOD(m)     (Action){ mod_action,          .mod = m }
+// tap=send keycode; hold=send modifiers
+#define KOM(k,m)   (Action){ key_or_mod_action,   .key_or_mod = { k, m } }
+// tap=send utf8 string; hold=send modifiers
+#define SOM(s,m)   (Action){ str_or_mod_action,   .str_or_mod = { s, m } }
+// tap=send keycode; hold=change layer
+#define KOL(k,l)   (Action){ key_or_layer_action, .key_or_layer = { k, l } }
+// tap=send utf8 string; hold=change layer
+#define SOL(s,l)   (Action){ str_or_layer_action, .str_or_layer = { s, l } }
+// change layer
+#define LAY(l)     (Action){ layer_action,        .layer = { l } }
+// change layer while held
+#define LAH(l)     (Action){ hold_layer_action,   .layer = { l } }
+// change layer for next key only
+#define LA1(l)     (Action){ once_layer_action,   .layer = { l } }
+// change layer and keep it changed
+#define LCK(l)     (Action){ lock_layer_action,   .layer = { l } }
+// change base layer
+#define BAS(l)     (Action){ base_layer_action,   .layer = { l } }
+// execute a command
+#define COM(c)     (Action){ command_action,      .command = { c } }
+// send a mouse movement
+#define MOU(m)     (Action){ mouse_move_action,   .mouse_move = { m } }
+// send a mouse button press
+#define BUT(b)     (Action){ mouse_button_action, .mouse_button = { b } }
+// auxiliary actions, associated to the release of a key
+// release a keycode
+#define REK(k)     (Action){ rel_key_action,      .key = k }
+// release the keycode corresponding to the ascii char
+#define REA(c)     (Action){ rel_asc_action,      .rea = c }
+// release a modifier
+#define REM(m)     (Action){ rel_mod_action,      .mod = m }
+// release a layer (go back do base layer)
+#define REL()      (Action){ rel_layer_action }
+// release the "one key" layer (go back to the layer it was before)
+#define REO()      (Action){ rel_once_layer_action }
+// release mouse button
+#define REB(b)     (Action){ rel_button_action,   .mouse_button = { b } }
+
+
+char *action_description(Action *a)
 {
   static char description[25];
-  sprintf(description, "act%d:%s", a.action_type, action_name[a.action_type]);
+  sprintf(description, "act%d:%.18s", a->action_type, action_name[a->action_type]);
   return description;
 }
 
-// key actions
-#define NO_ACTION  (Action){ no_action }
-#define KEY(k)     (Action){ key_action,          .key = k }
-#define ASC(u,s)   (Action){ asc_action,          .asc = { u, s } }
-#define STR(s)     (Action){ str_action,          .str = { s } }
-#define MOD(m)     (Action){ mod_action,          .mod = m }
-#define KOM(k,m)   (Action){ key_or_mod_action,   .key_or_mod = { k, m } }
-#define SOM(s,m)   (Action){ str_or_mod_action,   .str_or_mod = { s, m } }
-#define KOL(k,l)   (Action){ key_or_layer_action, .key_or_layer = { k, l } }
-#define SOL(s,l)   (Action){ str_or_layer_action, .str_or_layer = { s, l } }
-#define LAY(l)     (Action){ layer_action,        .layer = { l } }
-#define LAH(l)     (Action){ hold_layer_action,   .layer = { l } }
-#define LA1(l)     (Action){ once_layer_action,   .layer = { l } }
-#define LCK(l)     (Action){ lock_layer_action,   .layer = { l } }
-#define BAS(l)     (Action){ base_layer_action,   .layer = { l } }
-#define COM(c)     (Action){ command_action,      .command = { c } }
-#define MOU(m)     (Action){ mouse_move_action,   .mouse_move = { m } }
-#define BUT(b)     (Action){ mouse_button_action, .mouse_button = { b } }
-// auxiliary actions
-#define REK(k)     (Action){ rel_key_action,      .key = k }
-#define REA(c)     (Action){ rel_asc_action,      .rea = c }
-#define REM(m)     (Action){ rel_mod_action,      .mod = m }
-#define REL()      (Action){ rel_layer_action }
-#define REO()      (Action){ rel_once_layer_action }
-#define REB(b)     (Action){ rel_button_action,   .mouse_button = { b } }
-
-/*
-OnHold     -       Sr Sr     -
-beingHeld  -       -  -      -
-Pressed    Sr      -  -      -
-Released   -       -  Sr     -
-Exec       aSr>hSr -  ar,rr  -
-Out        -       -  r      -
-
-OnHold     -       Sr Sr  Sr,l Sr,l     - -  -
-beingHeld  -       -  -   -    -        - -  -
-Pressed    Sr      -  l   -    -        - -  -
-Released   -       -  -   -    Sr       - l  -
-Exec       aSr>hSr -  hl  -    ar,rr,al - rl -
-Out        -       -  -   -    r,l      - -  -
-
-OnHold     -       Sr Sr  Sr,l Sr,l        - -  -     - -
-beingHeld  -       -  -   -    -           S S  S     - -
-Pressed    Sr      -  l   -    -           - Sl -     - -
-Released   -       -  -   -    l           - -  Sr    - Sl
-Exec       aSr>hSr -  hl  -    aS,bS,al,rl - al BS,rS - rl
-Out        -       -  -   -    Sl          - Sl -     - -
-
-OnHold     -       Sr Sr  Sr,l Sr,l Sr,l,Cr Sr,l,Cr           -   -     -
-beingHeld  -       -  -   -    -    -       -                 S,C S,C     -
-Pressed    Sr      -  l   -    Cr   -       -                 -   -     -
-Released   -       -  -   -    -    -       l                 -   -
-Exec       aSr>hSr -  hl  -    hCr  -       aS,bS,al,rl,aC,bC -   BS,rS -
-Out        -       -  -   -    -    -       Sl                -   -
-
-*/
-
+void no_actuate(Action *self, Key *key, Controller *controller) {
+}
 void key_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressKeycode(controller, self->key.keycode);
   key_setReleaseAction(key, REK(self->key.keycode));
@@ -376,7 +416,7 @@ void asc_actuate(Action *self, Key *key, Controller *controller) {
 }
 void str_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressString(controller, self->str.str);
-  key_setReleaseAction(key, Action_noAction());
+  key_setReleaseAction(key, NO_ACTION);
 }
 void mod_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressModifier(controller, self->mod.modifier);
@@ -384,11 +424,11 @@ void mod_actuate(Action *self, Key *key, Controller *controller) {
 }
 void layer_actuate(Action *self, Key *key, Controller *controller) {
   controller_changeLayer(controller, self->layer.layer_id);
-  key_setReleaseAction(key, Action_noAction());
+  key_setReleaseAction(key, NO_ACTION);
 }
 void base_layer_actuate(Action *self, Key *key, Controller *controller) {
   controller_changeBaseLayer(controller, self->layer.layer_id);
-  key_setReleaseAction(key, Action_noAction());
+  key_setReleaseAction(key, NO_ACTION);
 }
 void hold_layer_actuate(Action *self, Key *key, Controller *controller) {
   controller_changeLayer(controller, self->layer.layer_id);
@@ -400,7 +440,7 @@ void once_layer_actuate(Action *self, Key *key, Controller *controller) {
 }
 void lock_layer_actuate(Action *self, Key *key, Controller *controller) {
   controller_lockLayer(controller, self->layer.layer_id);
-  key_setReleaseAction(key, Action_noAction());
+  key_setReleaseAction(key, NO_ACTION);
 }
 void mouse_move_actuate(Action *self, Key *key, Controller *controller) {
   int val = key_val(key);
@@ -420,7 +460,7 @@ void mouse_move_actuate(Action *self, Key *key, Controller *controller) {
     controller_moveMouse(controller, v, h, wv, wh);
     controller_setTimedAction(controller, key, *self, interval);
   }
-  key_setReleaseAction(key, Action_noAction());
+  key_setReleaseAction(key, NO_ACTION);
 }
 void mouse_button_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressMouseButton(controller, self->mouse_button.button);
@@ -428,7 +468,7 @@ void mouse_button_actuate(Action *self, Key *key, Controller *controller) {
 }
 void command_actuate(Action *self, Key *key, Controller *controller) {
   controller_doCommand(controller, self->command.command);
-  key_setReleaseAction(key, Action_noAction());
+  key_setReleaseAction(key, NO_ACTION);
 }
 
 
@@ -456,16 +496,12 @@ Action Action_noAction(void)
   return NO_ACTION;
 }
 
-bool action_isNoAction(Action action)
-{
-  return action.action_type == no_action;
-}
-
 #define ACTION_CASE(action) case action##_action: action##_actuate(self, key, controller); break
 void action_actuate(Action *self, Key *key, Controller *controller)
 {
-  log(LOG_T, "actuate %s %s", key_description(key), action_description(*self));
+  log(LOG_T, "actuate %s %s", key_description(key), action_description(self));
   switch (self->action_type) {
+    ACTION_CASE(no);
     ACTION_CASE(key);
     ACTION_CASE(asc);
     ACTION_CASE(str);
@@ -484,13 +520,11 @@ void action_actuate(Action *self, Key *key, Controller *controller)
     ACTION_CASE(rel_layer);
     ACTION_CASE(rel_once_layer);
     ACTION_CASE(rel_button);
-    case no_action: break;
     default: log(LOG_E, "Do not know how to actuate action type %d.", self->action_type);
   }
 }
 
-enum holdType { noHoldType, modHoldType, layerHoldType }
-action_holdType(Action *self)
+enum holdType action_holdType(Action *self)
 {
   switch (self->action_type) {
     case key_or_mod_action:
@@ -503,6 +537,7 @@ action_holdType(Action *self)
       return noHoldType;
   }
 }
+
 bool action_isTypingAction(Action *self)
 {
   switch (self->action_type) {
@@ -548,6 +583,7 @@ Action action_holdAction(Action *self)
 }
 
 
+// layers  {{{1
 Action layer[][36] = {
   [COLEMAK] = {
     KEY(K_Q       ), KEY(K_W       ), KEY(K_F       ), KEY(K_P       ), KEY(K_B       ),
@@ -620,7 +656,7 @@ Action layer[][36] = {
     NO_ACTION,       NO_ACTION,       NO_ACTION,
   },
   [FUN] = {
-    KEY(K_F12     ), KEY(K_F7      ), KEY(K_F8      ), KEY(K_F9      ), KEY(K_PRTSC   ), 
+    KEY(K_F12     ), KEY(K_F7      ), KEY(K_F8      ), KEY(K_F9      ), KEY(K_PRTSC   ),
     KEY(K_F11     ), KEY(K_F4      ), KEY(K_F5      ), KEY(K_F6      ), KEY(K_SCRLK   ),
     KEY(K_F10     ), KEY(K_F1      ), KEY(K_F2      ), KEY(K_F3      ), KEY(K_PAUSE   ),
     KEY(K_APP     ), KEY(K_SPC     ), KEY(K_TAB     ),
@@ -641,43 +677,7 @@ Action layer[][36] = {
   },
 };
 
-const struct mod_key { modifier_t mod; keycode_t key; } ascii_to_mod_key[] = {
-  [0x00] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x04] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x08] = {0,    K_BS      }, {0,    K_TAB   }, {0,    K_ENT   }, {0,    0       },
-  [0x0C] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x10] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x14] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x18] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    K_ESC   },
-  [0x1C] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x20] = {0,    K_SPC     }, {SHFT, K_1     }, {SHFT, K_APOSTR}, {SHFT, K_3     },// !"#
-  [0x24] = {SHFT, K_4       }, {SHFT, K_5     }, {SHFT, K_7     }, {0,    K_APOSTR},//$%&'
-  [0x28] = {SHFT, K_9       }, {SHFT, K_0     }, {SHFT, K_8     }, {SHFT, K_EQUAL },//()*+
-  [0x2C] = {0,    K_COMMA   }, {0,    K_MINUS }, {0,    K_DOT   }, {0,    K_SLASH },//,-./
-  [0x30] = {0,    K_0       }, {0,    K_1     }, {0,    K_2     }, {0,    K_3     },//0123
-  [0x34] = {0,    K_4       }, {0,    K_5     }, {0,    K_6     }, {0,    K_7     },//4567
-  [0x38] = {0,    K_8       }, {0,    K_9     }, {SHFT, K_SMCOL }, {0,    K_SMCOL },//89:;
-  [0x3C] = {SHFT, K_COMMA   }, {0,    K_EQUAL }, {SHFT, K_DOT   }, {SHFT, K_SLASH },//<=>?
-  [0x40] = {SHFT, K_2       }, {SHFT, K_A     }, {SHFT, K_B     }, {SHFT, K_C     },//@ABC
-  [0x44] = {SHFT, K_D       }, {SHFT, K_E     }, {SHFT, K_F     }, {SHFT, K_G     },//DEFG
-  [0x48] = {SHFT, K_H       }, {SHFT, K_I     }, {SHFT, K_J     }, {SHFT, K_K     },//HIJK
-  [0x4C] = {SHFT, K_L       }, {SHFT, K_M     }, {SHFT, K_N     }, {SHFT, K_O     },//LMNO
-  [0x50] = {SHFT, K_P       }, {SHFT, K_Q     }, {SHFT, K_R     }, {SHFT, K_S     },//PQRS
-  [0x54] = {SHFT, K_T       }, {SHFT, K_U     }, {SHFT, K_V     }, {SHFT, K_W     },//TUVW
-  [0x58] = {SHFT, K_X       }, {SHFT, K_Y     }, {SHFT, K_Z     }, {0,    K_LBRAKT},//XYZ[
-  [0x5C] = {0,    K_BKSLASH }, {0,    K_RBRAKT}, {SHFT, K_6     }, {SHFT, K_MINUS },//\]^_
-  [0x60] = {0,    K_GRAVE   }, {0,    K_A     }, {0,    K_B     }, {0,    K_C     },//`abc
-  [0x64] = {0,    K_D       }, {0,    K_E     }, {0,    K_F     }, {0,    K_G     },//defg
-  [0x68] = {0,    K_H       }, {0,    K_I     }, {0,    K_J     }, {0,    K_K     },//hijk
-  [0x6C] = {0,    K_L       }, {0,    K_M     }, {0,    K_N     }, {0,    K_O     },//lmno
-  [0x70] = {0,    K_P       }, {0,    K_Q     }, {0,    K_R     }, {0,    K_S     },//pqrs
-  [0x74] = {0,    K_T       }, {0,    K_U     }, {0,    K_V     }, {0,    K_W     },//tuvw
-  [0x78] = {0,    K_X       }, {0,    K_Y     }, {0,    K_Z     }, {SHFT, K_LBRAKT},//xyz{
-  [0x7C] = {SHFT, K_BKSLASH }, {SHFT, K_RBRAKT}, {SHFT, K_GRAVE }, {0,    K_DEL   },//|}~
-};
-
-
-// WS2812 rgb led
+// WS2812 rgb led  {{{1
 
 #define WS2812_PIN 16
 #define IS_RGBW true
@@ -697,10 +697,10 @@ void led_init()
   int sm = 0;
   uint offset = pio_add_program(pio, &ws2812_program);
 
-  ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW); 
+  ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
 }
 
-// USB
+// USB  {{{1
 // interfaces with tinyUSB
 
 
@@ -739,7 +739,7 @@ void keycodeq_insertData(Keycodeq *self, struct kcq_data data)
     self->max_count = self->count;
     log(LOG_I, "max keycode queue count: %d", self->max_count);
   }
-} 
+}
 
 void keycodeq_insertKeycodePress(Keycodeq *self, keycode_t keycode)
 {
@@ -795,14 +795,14 @@ modifier_t keycodeq_removeModifier(Keycodeq *self)
 }
 
 
-typedef struct {
+struct usb {
   Keycodeq keycodeq;
   uint8_t keycodes[6];
   uint8_t n_keycodes;
   uint8_t modifiers;
   button_t buttons;
   bool capsLocked;
-} USB;
+};
 
 USB *USB_singleton;
 
@@ -893,7 +893,7 @@ void usb_sendReport(USB *self)
     log(LOG_R, "send report %02x %02x.%02x.%02x.%02x.%02x.%02x",
         self->modifiers,
         self->keycodes[0], self->keycodes[1], self->keycodes[2],
-        self->keycodes[3], self->keycodes[4], self->keycodes[5]); 
+        self->keycodes[3], self->keycodes[4], self->keycodes[5]);
     tud_hid_keyboard_report(REPORT_ID_KEYBOARD, self->modifiers, self->keycodes);
   }
 }
@@ -1008,8 +1008,8 @@ void usb_task(USB *self)
   }
 }
 
-  
 
+// UART  {{{1
 void uart_send_key_val(uint8_t keyId, uint8_t val)
 {
   uint8_t b0 = val+0xA0;
@@ -1061,7 +1061,7 @@ bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
 }
 
 
-// Key
+// Key  {{{1
 // stores info about a key
 
 struct key {
@@ -1237,9 +1237,10 @@ void key_setNewRaw(Key *self, uint16_t newRaw)
 }
 
 
-// Controller
+// Controller  {{{1
 // controls the processing of keypresses
 
+// KeyList  {{{2
 typedef struct key_list_node KeyListNode;
 typedef struct key_list KeyList;
 
@@ -1354,7 +1355,7 @@ bool keyList_containsKey(KeyList *self, Key *key)
   }
   return false;
 }
-
+// }}}
 
 struct controller {
   layer_id_t currentLayer;
@@ -1391,7 +1392,7 @@ void controller_init(Controller *self, USB *usb)
   self->wordLocked = false;
 }
 
-// auxiliary functions for unicode
+// auxiliary functions for unicode  {{{2
 uint16_t to_majus(uint16_t minus)
 {
   uint16_t majus = minus;
@@ -1426,7 +1427,7 @@ uint32_t unicode_from_utf8(char *p)
     case 1:
       return   p[0];
     case 2:
-      return ((p[0] & 0b00011111) <<  6) 
+      return ((p[0] & 0b00011111) <<  6)
            |  (p[1] & 0b00111111);
     case 3:
       return ((p[0] & 0b00001111) << 12)
@@ -1442,7 +1443,8 @@ uint32_t unicode_from_utf8(char *p)
   }
 }
 
-// auxiliary functions for wordLock
+
+// auxiliary functions for wordLock  {{{2
 bool uni_in_word(uint16_t uni)
 {
   if (uni == '_') return true;
@@ -1468,6 +1470,7 @@ bool keycode_in_word_invert_shift(keycode_t keycode)
   if (keycode >= K_A && keycode <= K_Z) return true;
   return false;
 }
+// }}}
 
 void static controller__setWordLocked(Controller *self, bool newVal)
 {
@@ -1575,8 +1578,8 @@ layer_id_t controller_baseLayer(Controller *self)
 
 void controller__pressKey(Controller *self, Key *key)
 {
-  log(LOG_T, "pressKey %s %s", key_description(key), action_description(action));
   Action action = layer[self->currentLayer][key_id(key)];
+  log(LOG_T, "pressKey %s %s", key_description(key), action_description(&action));
   key_setReleaseAction(key, Action_noAction()); // just in case...
   if (key_side(key) == self->holdSide) {
     if (action_isTypingAction(&action)) {
@@ -1585,10 +1588,10 @@ void controller__pressKey(Controller *self, Key *key)
     }
     keyList_insertKey(self->keysBeingHeld, key);
     action = action_holdAction(&action);
-    log(LOG_T, "hold: %s", action_description(action));
+    log(LOG_T, "hold: %s", action_description(&action));
   } else {
     action = action_tapAction(&action);
-    log(LOG_T, "tap: %s", action_description(action));
+    log(LOG_T, "tap: %s", action_description(&action));
   }
   action_actuate(&action, key, self);
 }
@@ -1604,22 +1607,32 @@ void controller__releaseKey(Controller *self, Key *key)
   key_setReleaseAction(key, Action_noAction());
 }
 
+void controller__resetHoldTimeout(Controller *self)
+{
+  if (!keyList_empty(self->keysOnHold)) {
+    self->holdTimeout = board_millis() + 333;
+    if (self->holdTimeout == 0) self->holdTimeout++;
+  } else {
+    self->holdTimeout = 0;
+  }
+}
+
 void controller_keyPressed(Controller *self, Key *key)
 {
   log(LOG_T, "keyPressed: %s", key_description(key));
   if (!keyList_empty(self->keysOnHold)) {
     log(LOG_T, " on hold2");
     keyList_insertKey(self->keysOnHold, key);
-    controller_resetHoldTimeout(self);
+    controller__resetHoldTimeout(self);
   } else {
     Action *action = &layer[self->currentLayer][key_id(key)];
     if (action_holdType(action) == noHoldType) {
-      log(LOG_T, " press action: %s", action_description(*action));
+      log(LOG_T, " press action: %s", action_description(action));
       controller__pressKey(self, key);
     } else {
       log(LOG_T, "on hold1");
       keyList_insertKey(self->keysOnHold, key);
-      controller_resetHoldTimeout(self);
+      controller__resetHoldTimeout(self);
     }
   }
 }
@@ -1658,21 +1671,19 @@ void controller_keyReleased(Controller *self, Key *key)
       keyList_removeFirstKey(self->keysOnHold);
       controller__pressKey(self, key);
       controller__releaseKey(self, key);
-      controller_resetHoldTimeout(self);
+      controller__resetHoldTimeout(self);
     } else { // it's a hold
       log(LOG_T, " it's a hold (%s, first %s)", key_description(key), key_description(firstKey));
       controller_holdKeysOnHoldUntilKey(self, key);
       controller__releaseKey(self, key);
-      controller_resetHoldTimeout(self);
+      controller__resetHoldTimeout(self);
     }
   } else {
     log(LOG_T, " was not held");
     controller__releaseKey(self, key);
   }
-  if (!action_isNoAction(delayedAction)) {
-    log(LOG_T, " delayed action %s", action_description(delayedAction));
-    action_actuate(&delayedAction, key, self);
-  }
+  log(LOG_T, " delayed action %s", action_description(&delayedAction));
+  action_actuate(&delayedAction, key, self);
 }
 
 void controller_pressKeycode(Controller *self, keycode_t keycode)
@@ -1820,14 +1831,14 @@ void controller_releaseMouseButton(Controller *self, button_t button)
   usb_releaseMouseButton(self->usb, button);
 }
 void controller_moveMouse(Controller *self, int v, int h, int wv, int wh)
-{  
+{
   //log(LOG_T, "controller move %d %d %d %d\n", v, h, wv, wh);
   usb_moveMouse(self->usb, v, h, wv, wh);
 }
 void controller_setDelayedReleaseAction(Controller *self, Action action)
 {
   log(LOG_T, "set delayed");
-  log(LOG_T, "%s: %s", __func__, action_description(action));
+  log(LOG_T, "%s: %s", __func__, action_description(&action));
   self->delayedReleaseAction = action;
 }
 void controller_doCommand(Controller *self, int command)
@@ -1853,15 +1864,6 @@ void controller_setTimedAction(Controller *self, Key *key, Action action, int in
   if (self->timedTimestamp == 0) self->timedTimestamp++;
   self->timedKey = key;
 }
-void controller_resetHoldTimeout(Controller *self)
-{
-  if (!keyList_empty(self->keysOnHold)) {
-    self->holdTimeout = board_millis() + 333;
-    if (self->holdTimeout == 0) self->holdTimeout++;
-  } else {
-    self->holdTimeout = 0;
-  }
-}
 
 void controller_task(Controller *self)
 {
@@ -1876,8 +1878,7 @@ void controller_task(Controller *self)
   }
 }
 
-
-// LocalReader
+// LocalReader  {{{1
 // reads the keys physically connected to local microcontroller
 typedef struct {
   #define N_SEL 5
@@ -1939,7 +1940,7 @@ static uint16_t readPin(uint sel, uint ana)
 static keyboardSide readKeyboardSide()
 {
   // on the right keyboard half, pin 2 is connected to pin 1;
-  // on the left half, it is connected to pin 3 
+  // on the left half, it is connected to pin 3
   gpio_init(2);
   gpio_set_dir(2, GPIO_IN);
   gpio_init(1);
@@ -1950,9 +1951,9 @@ static keyboardSide readKeyboardSide()
   gpio_put(3, 1);
   sleep_us(10);
   keyboardSide side = gpio_get(2) ? leftSide : rightSide;
-  gpio_deinit(2); 
-  gpio_deinit(1); 
-  gpio_deinit(3); 
+  gpio_deinit(2);
+  gpio_deinit(1);
+  gpio_deinit(3);
   return side;
 }
 
@@ -2014,6 +2015,7 @@ void localReader_readKeys(LocalReader *self)
 }
 
 
+// RemoteReader  {{{1
 typedef struct {
   Key keys[N_HWKEY];
 } RemoteReader;
@@ -2035,6 +2037,7 @@ void remoteReader_readKeys(RemoteReader *self)
 }
 
 
+// main  {{{1
 void log_keys(Key *keys)
 {
   static uint32_t t0 = 0;
@@ -2129,13 +2132,14 @@ int main()
   return 0;
 }
 
+// USB callbacks  {{{1
 #if 0
 //--------------------------------------------------------------------+
 // Device callbacks
 //--------------------------------------------------------------------+
 
 // Invoked when cdc when line state changed e.g connected/disconnected
-void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts) 
+void tud_cdc_line_state_cb(uint8_t itf, bool dtr, bool rts)
 {
 	(void)itf;
 	(void)rts;
