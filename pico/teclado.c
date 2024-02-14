@@ -699,6 +699,7 @@ void led_init()
   uint offset = pio_add_program(pio, &ws2812_program);
 
   ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
+  led_set_rgb(0, 0, 0);
 }
 
 // USB  {{{1
