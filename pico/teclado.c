@@ -215,7 +215,6 @@ void log_set_level(uint8_t new_level)
       tud_task(); \
     }
 
-//
 
 // Action  {{{1
 // all things that can happen when a key is pressed or released
@@ -1375,18 +1374,18 @@ bool keyList_containsKey(KeyList *self, Key *key)
 
 // auxiliary functions for unicode  {{{1
 //   very basic support for á->Á and finding a codepoint in a utf8 str
-uint32_t to_majus(uint32_t minus)
+uint32_t uni_to_upper(uint32_t lower)
 {
-  uint16_t majus = minus;
-  if (minus >= 0x61 && minus <= 0x7e) majus = minus - 0x20;
-  else if (minus >= 0xe0 && minus <= 0xfe && minus != 0xf7) majus = minus - 0x20;
-  else if (minus == 0xff) majus = 0x178;
-  else if (minus >= 0x100 && minus <= 0x137 && (minus&1) == 1) majus = minus - 1;
-  else if (minus >= 0x139 && minus <= 0x148 && (minus&1) == 0) majus = minus - 1;
-  else if (minus >= 0x14a && minus <= 0x177 && (minus&1) == 1) majus = minus - 1;
-  else if (minus >= 0x179 && minus <= 0x17e && (minus&1) == 0) majus = minus - 1;
+  uint32_t upper = lower;
+  if (lower >= 0x61 && lower <= 0x7e) upper = lower - 0x20;
+  else if (lower >= 0xe0 && lower <= 0xfe && lower != 0xf7) upper = lower - 0x20;
+  else if (lower == 0xff) upper = 0x178;
+  else if (lower >= 0x100 && lower <= 0x137 && (lower&1) == 1) upper = lower - 1;
+  else if (lower >= 0x139 && lower <= 0x148 && (lower&1) == 0) upper = lower - 1;
+  else if (lower >= 0x14a && lower <= 0x177 && (lower&1) == 1) upper = lower - 1;
+  else if (lower >= 0x179 && lower <= 0x17e && (lower&1) == 0) upper = lower - 1;
   // TODO: missing cases
-  return majus;
+  return upper;
 }
 
 int utf8_nbytes(char *s)
@@ -1471,7 +1470,7 @@ bool uni_in_word(uint32_t uni)
   if (uni >= '0' && uni <= '9') return true;
   if (uni >= 'a' && uni <= 'z') return true;
   if (uni >= 'A' && uni <= 'Z') return true;
-  if (uni != to_majus(uni) /*|| uni != to_minus(uni)*/) return true;
+  if (uni != uni_to_upper(uni) /*|| uni != uni_to_lower(uni)*/) return true;
   return false;
 }
 
@@ -1769,7 +1768,7 @@ void controller__send_utf8_str(Controller *self, char s[])
     uint32_t u = unicode_from_utf8(s);
     if (u == 0) break;
     if (self->wordLocked && !uni_in_word(u)) controller__setWordLocked(self, false);
-    if (shifted ^ capsLocked ^ self->wordLocked) u = to_majus(u);
+    if (shifted ^ capsLocked ^ self->wordLocked) u = uni_to_upper(u);
     controller__send_usb_unicode_char(self, u);
     s += utf8_nbytes(s);
   }
@@ -1783,7 +1782,7 @@ void controller__send_utf8_str(Controller *self, char s[])
 uint8_t controller__send_press_ascii_char(Controller *self, uint8_t ch)
 {
   if (self->wordLocked && !uni_in_word(ch)) controller__setWordLocked(self, false);
-  if (self->wordLocked) ch = to_majus(ch);
+  if (self->wordLocked) ch = uni_to_upper(ch);
   controller__send_usb_press_ascii_char(self, ch);
   usb_setModifiers(self->usb, self->modifiers);
   return ch;
