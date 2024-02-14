@@ -1720,12 +1720,12 @@ void controller__send_usb_release_ascii_char(Controller *self, uint8_t ch)
 
 void controller__send_usb_hex_nibble(Controller *self, uint8_t h)
 {
-  keycode_t k;
-  if      (h == 0) k = K_0;
-  else if (h < 10) k = K_1 + h - 1;
-  else             k = K_A + h - 10;
-  usb_pressKeycode(self->usb, k);
-  usb_releaseKeycode(self->usb, k);
+  uint8_t ch = h + '0';
+  if (ch > '9') {
+    ch += 'A' - ('9' + 1);
+  }
+  controller__send_usb_press_ascii_char(self, ch);
+  controller__send_usb_release_ascii_char(self, ch);
 }
 
 void controller__send_usb_hex(Controller *self, uint32_t hex)
