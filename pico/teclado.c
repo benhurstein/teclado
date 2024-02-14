@@ -800,6 +800,7 @@ struct usb {
   Keycodeq keycodeq;
   uint8_t keycodes[6];
   uint8_t n_keycodes;
+  uint8_t modifiers;
   uint8_t sent_modifiers;
   button_t buttons;
   bool capsLocked;
@@ -812,6 +813,7 @@ void usb_init(USB *self)
   USB_singleton = self;
   keycodeq_init(&self->keycodeq);
   self->sent_modifiers = 0;
+  self->modifiers = 0;
   self->n_keycodes = 0;
   memset(self->keycodes, 0, 6);
   self->buttons = 0;
@@ -862,13 +864,28 @@ modifier_t keycode_to_modifier(keycode_t keycode)
 
 void usb_pressModifier(USB *self, modifier_t modifier)
 {
+  self->modifiers |= modifier;
   keycodeq_insertModifierPress(&self->keycodeq, modifier);
 }
 
 void usb_releaseModifier(USB *self, modifier_t modifier)
 {
+  self->modifiers &= ~modifier;
   keycodeq_insertModifierRelease(&self->keycodeq, modifier);
 }
+
+void usb_setModifiers(USB *self, modifier_t new_modifiers)
+{
+  modifier_t release_modifiers = self->modifiers & ~new_modifiers;
+  if (release_modifiers != 0) {
+    usb_releaseModifier(self, release_modifiers);
+  }
+  modifier_t press_modifiers = ~self->modifiers & new_modifiers;
+  if (press_modifiers != 0) {
+    usb_pressModifier(self, press_modifiers);
+  }
+}
+
 
 void usb_pressKeycode(USB *self, keycode_t keycode)
 {
