@@ -1255,10 +1255,7 @@ void key_setNewRaw(Key *self, uint16_t newRaw)
 }
 
 
-// Controller  {{{1
-// controls the processing of keypresses
-
-// KeyList  {{{2
+// KeyList  {{{1
 typedef struct key_list_node KeyListNode;
 typedef struct key_list KeyList;
 
@@ -1373,45 +1370,10 @@ bool keyList_containsKey(KeyList *self, Key *key)
   }
   return false;
 }
-// }}}
 
-struct controller {
-  layer_id_t currentLayer;
-  layer_id_t baseLayer;
-  layer_id_t lockLayer;
-  KeyList *keysOnHold;
-  KeyList *keysBeingHeld;
-  USB *usb;
-  enum holdType holdType;
-  keyboardSide holdSide;
-  Action timedAction;
-  uint32_t timedTimestamp;
-  Key *timedKey;
-  Action delayedReleaseAction;
-  uint32_t holdTimeout;
-  modifier_t modifiers;
-  modifier_t usb_modifiers;
-  bool wordLocked;
-};
-
-void controller_init(Controller *self, USB *usb)
-{
-  self->usb = usb;
-  self->currentLayer = self->baseLayer = COLEMAK;
-  self->lockLayer = NO_LAYER;
-  self->keysOnHold = KeyList_create();
-  self->keysBeingHeld = KeyList_create();
-  self->holdType = noHoldType;
-  self->holdSide = noSide;
-  self->timedTimestamp = 0;
-  self->delayedReleaseAction = Action_noAction();
-  self->modifiers = 0;
-  self->usb_modifiers = 0;
-  self->wordLocked = false;
-}
-
-// auxiliary functions for unicode  {{{2
-uint16_t to_majus(uint16_t minus)
+// auxiliary functions for unicode  {{{1
+//   very basic support for á->Á and finding a codepoint in a utf8 str
+uint32_t to_majus(uint32_t minus)
 {
   uint16_t majus = minus;
   if (minus >= 0x61 && minus <= 0x7e) majus = minus - 0x20;
@@ -1421,6 +1383,7 @@ uint16_t to_majus(uint16_t minus)
   else if (minus >= 0x139 && minus <= 0x148 && (minus&1) == 0) majus = minus - 1;
   else if (minus >= 0x14a && minus <= 0x177 && (minus&1) == 1) majus = minus - 1;
   else if (minus >= 0x179 && minus <= 0x17e && (minus&1) == 0) majus = minus - 1;
+  // TODO: missing cases
   return majus;
 }
 
@@ -1462,8 +1425,47 @@ uint32_t unicode_from_utf8(char *p)
 }
 
 
+
+// Controller  {{{1
+// controls the processing of keypresses
+
+struct controller {
+  layer_id_t currentLayer;
+  layer_id_t baseLayer;
+  layer_id_t lockLayer;
+  KeyList *keysOnHold;
+  KeyList *keysBeingHeld;
+  USB *usb;
+  enum holdType holdType;
+  keyboardSide holdSide;
+  Action timedAction;
+  uint32_t timedTimestamp;
+  Key *timedKey;
+  Action delayedReleaseAction;
+  uint32_t holdTimeout;
+  modifier_t modifiers;
+  modifier_t usb_modifiers;
+  bool wordLocked;
+};
+
+void controller_init(Controller *self, USB *usb)
+{
+  self->usb = usb;
+  self->currentLayer = self->baseLayer = COLEMAK;
+  self->lockLayer = NO_LAYER;
+  self->keysOnHold = KeyList_create();
+  self->keysBeingHeld = KeyList_create();
+  self->holdType = noHoldType;
+  self->holdSide = noSide;
+  self->timedTimestamp = 0;
+  self->delayedReleaseAction = Action_noAction();
+  self->modifiers = 0;
+  self->usb_modifiers = 0;
+  self->wordLocked = false;
+}
+
 // auxiliary functions for wordLock  {{{2
-bool uni_in_word(uint16_t uni)
+bool uni_in_word(uint32_t uni)
 {
   if (uni == '_') return true;
   if (uni >= '0' && uni <= '9') return true;
@@ -1779,7 +1781,7 @@ void controller__send_utf8_str(Controller *self, char s[])
     controller__send_usb_press_keycode(self, K_CAPS);
     controller__send_usb_release_keycode(self, K_CAPS);
   }
-  log(LOG_T, "shift:%d(%02x) caps:%d", shifted, self->usb->modifiers, capsLocked);
+  log(LOG_T, "shift:%d(%02x) caps:%d", shifted, self->usb->sent_modifiers, capsLocked);
   while (true) {
     uint32_t u = unicode_from_utf8(s);
     if (u == 0) break;
