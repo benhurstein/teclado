@@ -1684,13 +1684,21 @@ void controller_keyReleased(Controller *self, Key *key)
 void controller_pressKeycode(Controller *self, keycode_t keycode)
 {
   log(LOG_T, "%s(%d)", __func__, keycode);
-  controller__send_press_keycode(self, keycode);
+  if (keycode_is_modifier(keycode)) {
+    controller__add_modifiers(self, keycode_to_modifier(keycode));
+  } else {
+    controller__send_press_keycode(self, keycode);
+  }
 }
 
 void controller_releaseKeycode(Controller *self, keycode_t keycode)
 {
   log(LOG_T, "%s(%d)", __func__, keycode);
-  controller__send_release_keycode(self, keycode);
+  if (keycode_is_modifier(keycode)) {
+    controller__remove_modifiers(self, keycode_to_modifier(keycode));
+  } else {
+    controller__send_release_keycode(self, keycode);
+  }
 }
 
 
