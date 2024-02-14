@@ -1519,16 +1519,6 @@ bool controller__is_shifted(Controller *self)
   return (self->modifiers & (SHFT|RSHFT)) != 0;
 }
 
-void controller__send_usb_press_keycode(Controller *self, keycode_t keycode)
-{
-  usb_pressKeycode(self->usb, keycode);
-}
-
-void controller__send_usb_release_keycode(Controller *self, keycode_t keycode)
-{
-  usb_releaseKeycode(self->usb, keycode);
-}
-
 void controller__send_press_keycode(Controller *self, keycode_t keycode)
 {
   if (self->wordLocked && !keycode_in_word(keycode, controller__is_shifted(self))) {
@@ -1539,14 +1529,14 @@ void controller__send_press_keycode(Controller *self, keycode_t keycode)
   } else {
     usb_setModifiers(self->usb, self->modifiers);
   }
-  controller__send_usb_press_keycode(self, keycode);
+  usb_pressKeycode(self->usb, keycode);
   usb_setModifiers(self->usb, self->modifiers);
 }
 
 void controller__send_release_keycode(Controller *self, keycode_t keycode)
 {
   usb_setModifiers(self->usb, self->modifiers);
-  controller__send_usb_release_keycode(self, keycode);
+  usb_releaseKeycode(self->usb, keycode);
 }
 
 void controller_changeLayer(Controller *self, layer_id_t layer)
@@ -1709,14 +1699,14 @@ void controller__send_usb_press_ascii_char(Controller *self, uint8_t ch)
   struct mod_key mk = ascii_to_mod_key[ch];
   if (mk.key != 0) {
     usb_setModifiers(self->usb, mk.mod|(self->modifiers & ~(SHFT|RSHFT)));
-    controller__send_usb_press_keycode(self, mk.key);
+    usb_pressKeycode(self->usb, mk.key);
   }
 }
 void controller__send_usb_release_ascii_char(Controller *self, uint8_t ch)
 {
   struct mod_key mk = ascii_to_mod_key[ch];
   if (mk.key != 0) {
-    controller__send_usb_release_keycode(self, mk.key);
+    usb_releaseKeycode(self->usb, mk.key);
   }
 }
 
@@ -1726,8 +1716,8 @@ void controller__send_usb_hex_nibble(Controller *self, uint8_t h)
   if      (h == 0) k = K_0;
   else if (h < 10) k = K_1 + h - 1;
   else             k = K_A + h - 10;
-  controller__send_usb_press_keycode(self, k);
-  controller__send_usb_release_keycode(self, k);
+  usb_pressKeycode(self->usb, k);
+  usb_releaseKeycode(self->usb, k);
 }
 
 void controller__send_usb_hex(Controller *self, uint32_t hex)
@@ -1749,12 +1739,12 @@ void controller__send_usb_unicode_char(Controller *self, uint32_t uni)
   } else {
     // send C-S-u unicode in hex — this works in linux
     usb_setModifiers(self->usb, RSHFT|RCTRL);
-    controller__send_usb_press_keycode(self, K_U);
-    controller__send_usb_release_keycode(self, K_U);
+    usb_pressKeycode(self->usb, K_U);
+    usb_releaseKeycode(self->usb, K_U);
     usb_setModifiers(self->usb, 0);
     controller__send_usb_hex(self, uni);
-    controller__send_usb_press_keycode(self, K_ENT);
-    controller__send_usb_release_keycode(self, K_ENT);
+    usb_pressKeycode(self->usb, K_SPC);
+    usb_releaseKeycode(self->usb, K_SPC);
   }
 }
 
@@ -1763,8 +1753,8 @@ void controller__send_utf8_str(Controller *self, char s[])
   bool capsLocked = usb_isCapsLocked(self->usb);
   bool shifted = controller__is_shifted(self);
   if (capsLocked) {
-    controller__send_usb_press_keycode(self, K_CAPS);
-    controller__send_usb_release_keycode(self, K_CAPS);
+    usb_pressKeycode(self->usb, K_CAPS);
+    usb_releaseKeycode(self->usb, K_CAPS);
   }
   log(LOG_T, "shift:%d(%02x) caps:%d", shifted, self->usb->sent_modifiers, capsLocked);
   while (true) {
@@ -1776,8 +1766,8 @@ void controller__send_utf8_str(Controller *self, char s[])
     s += utf8_nbytes(s);
   }
   if (capsLocked) {
-    controller__send_usb_press_keycode(self, K_CAPS);
-    controller__send_usb_release_keycode(self, K_CAPS);
+    usb_pressKeycode(self->usb, K_CAPS);
+    usb_releaseKeycode(self->usb, K_CAPS);
   }
   usb_setModifiers(self->usb, self->modifiers);
 }
