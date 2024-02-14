@@ -1,3 +1,4 @@
+// vim: foldmethod=marker
 // includes  {{{1
 #include <stdio.h>
 #include <stdlib.h>
