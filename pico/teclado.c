@@ -702,9 +702,7 @@ void led_init()
   led_set_rgb(0, 0, 0);
 }
 
-// USB  {{{1
-// interfaces with tinyUSB
-
+// Keycodeq  {{{1
 
 #define KCQ_N 200
 typedef struct {
@@ -796,6 +794,9 @@ modifier_t keycodeq_removeModifier(Keycodeq *self)
   return modifier;
 }
 
+
+// USB  {{{1
+// interfaces with tinyUSB
 
 struct usb {
   Keycodeq keycodeq;
