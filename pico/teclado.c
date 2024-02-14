@@ -800,7 +800,7 @@ struct usb {
   Keycodeq keycodeq;
   uint8_t keycodes[6];
   uint8_t n_keycodes;
-  uint8_t modifiers;
+  uint8_t sent_modifiers;
   button_t buttons;
   bool capsLocked;
 };
@@ -811,7 +811,7 @@ void usb_init(USB *self)
 {
   USB_singleton = self;
   keycodeq_init(&self->keycodeq);
-  self->modifiers = 0;
+  self->sent_modifiers = 0;
   self->n_keycodes = 0;
   memset(self->keycodes, 0, 6);
   self->buttons = 0;
@@ -857,7 +857,7 @@ bool keycode_is_modifier(keycode_t keycode)
 
 modifier_t keycode_to_modifier(keycode_t keycode)
 {
-  return 1<<(keycode-0xE0);
+  return 1 << (keycode - 0xE0);
 }
 
 void usb_pressModifier(USB *self, modifier_t modifier)
@@ -892,10 +892,10 @@ void usb_sendReport(USB *self)
 {
   if (mySide == usbSide) {
     log(LOG_R, "send report %02x %02x.%02x.%02x.%02x.%02x.%02x",
-        self->modifiers,
+        self->sent_modifiers,
         self->keycodes[0], self->keycodes[1], self->keycodes[2],
         self->keycodes[3], self->keycodes[4], self->keycodes[5]);
-    tud_hid_keyboard_report(REPORT_ID_KEYBOARD, self->modifiers, self->keycodes);
+    tud_hid_keyboard_report(REPORT_ID_KEYBOARD, self->sent_modifiers, self->keycodes);
   }
 }
 
@@ -959,7 +959,7 @@ void usb__sendKeycodePresses(USB *self)
 void usb__sendModifierPresses(USB *self)
 {
   while (keycodeq_head(&self->keycodeq) == modifierPress) {
-    self->modifiers |= keycodeq_removeModifier(&self->keycodeq);
+    self->sent_modifiers |= keycodeq_removeModifier(&self->keycodeq);
   }
   usb_sendReport(self);
 }
@@ -975,7 +975,7 @@ void usb__sendModifierReleases(USB *self)
 {
   enum command cmd = keycodeq_head(&self->keycodeq);
   while (keycodeq_head(&self->keycodeq) == modifierRelease) {
-    self->modifiers &= ~keycodeq_removeModifier(&self->keycodeq);
+    self->sent_modifiers &= ~keycodeq_removeModifier(&self->keycodeq);
     break;
   }
   usb_sendReport(self);
