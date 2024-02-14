@@ -1444,7 +1444,6 @@ struct controller {
   Action delayedReleaseAction;
   uint32_t holdTimeout;
   modifier_t modifiers;
-  modifier_t usb_modifiers;
   bool wordLocked;
 };
 
@@ -1460,7 +1459,6 @@ void controller_init(Controller *self, USB *usb)
   self->timedTimestamp = 0;
   self->delayedReleaseAction = Action_noAction();
   self->modifiers = 0;
-  self->usb_modifiers = 0;
   self->wordLocked = false;
 }
 
@@ -1498,25 +1496,10 @@ void static controller__setWordLocked(Controller *self, bool newVal)
   led_set_rgb(0, 0, self->wordLocked ? 20 : 0);
 }
 
-void controller__set_usb_modifiers(Controller *self, modifier_t new_modifiers)
-{
-  modifier_t old_modifiers = self->usb_modifiers;
-  if (new_modifiers == old_modifiers) return;
-  modifier_t release_modifiers = old_modifiers & ~new_modifiers;
-  if (release_modifiers != 0) {
-    usb_releaseModifier(self->usb, release_modifiers);
-  }
-  modifier_t press_modifiers = ~old_modifiers & new_modifiers;
-  if (press_modifiers != 0) {
-    usb_pressModifier(self->usb, press_modifiers);
-  }
-  self->usb_modifiers = new_modifiers;
-}
-
 void controller__set_modifiers(Controller *self, modifier_t new_modifiers)
 {
   self->modifiers = new_modifiers;
-  controller__set_usb_modifiers(self, new_modifiers);
+  usb_setModifiers(self->usb, new_modifiers);
 }
 
 void controller__add_modifiers(Controller *self, modifier_t new_modifiers)
@@ -1550,17 +1533,17 @@ void controller__send_press_keycode(Controller *self, keycode_t keycode)
     controller__setWordLocked(self, false);
   }
   if (self->wordLocked && keycode_in_word_invert_shift(keycode)) {
-    controller__set_usb_modifiers(self, self->modifiers ^ SHFT);
+    usb_setModifiers(self->usb, self->modifiers ^ SHFT);
   } else {
-    controller__set_usb_modifiers(self, self->modifiers);
+    usb_setModifiers(self->usb, self->modifiers);
   }
   controller__send_usb_press_keycode(self, keycode);
-  controller__set_usb_modifiers(self, self->modifiers);
+  usb_setModifiers(self->usb, self->modifiers);
 }
 
 void controller__send_release_keycode(Controller *self, keycode_t keycode)
 {
-  controller__set_usb_modifiers(self, self->modifiers);
+  usb_setModifiers(self->usb, self->modifiers);
   controller__send_usb_release_keycode(self, keycode);
 }
 
@@ -1723,7 +1706,7 @@ void controller__send_usb_press_ascii_char(Controller *self, uint8_t ch)
 {
   struct mod_key mk = ascii_to_mod_key[ch];
   if (mk.key != 0) {
-    controller__set_usb_modifiers(self, mk.mod|(self->modifiers & ~(SHFT|RSHFT)));
+    usb_setModifiers(self->usb, mk.mod|(self->modifiers & ~(SHFT|RSHFT)));
     controller__send_usb_press_keycode(self, mk.key);
   }
 }
@@ -1763,10 +1746,10 @@ void controller__send_usb_unicode_char(Controller *self, uint32_t uni)
     controller__send_usb_release_ascii_char(self, uni);
   } else {
     // send C-S-u unicode in hex — this works in linux
-    controller__set_usb_modifiers(self, RSHFT|RCTRL);
+    usb_setModifiers(self->usb, RSHFT|RCTRL);
     controller__send_usb_press_keycode(self, K_U);
     controller__send_usb_release_keycode(self, K_U);
-    controller__set_usb_modifiers(self, 0);
+    usb_setModifiers(self->usb, 0);
     controller__send_usb_hex(self, uni);
     controller__send_usb_press_keycode(self, K_ENT);
     controller__send_usb_release_keycode(self, K_ENT);
@@ -1794,7 +1777,7 @@ void controller__send_utf8_str(Controller *self, char s[])
     controller__send_usb_press_keycode(self, K_CAPS);
     controller__send_usb_release_keycode(self, K_CAPS);
   }
-  controller__set_usb_modifiers(self, self->modifiers);
+  usb_setModifiers(self->usb, self->modifiers);
 }
 
 uint8_t controller__send_press_ascii_char(Controller *self, uint8_t ch)
@@ -1802,14 +1785,14 @@ uint8_t controller__send_press_ascii_char(Controller *self, uint8_t ch)
   if (self->wordLocked && !uni_in_word(ch)) controller__setWordLocked(self, false);
   if (self->wordLocked) ch = to_majus(ch);
   controller__send_usb_press_ascii_char(self, ch);
-  controller__set_usb_modifiers(self, self->modifiers);
+  usb_setModifiers(self->usb, self->modifiers);
   return ch;
 }
 
 void controller__send_release_ascii_char(Controller *self, uint8_t ch)
 {
   controller__send_usb_release_ascii_char(self, ch);
-  controller__set_usb_modifiers(self, self->modifiers);
+  usb_setModifiers(self->usb, self->modifiers);
 }
 
 char controller_pressAscii(Controller *self, char unshifted_char, char shifted_char)
