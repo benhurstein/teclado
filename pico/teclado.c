@@ -1434,7 +1434,7 @@ struct controller {
   layer_id_t currentLayer;
   layer_id_t baseLayer;
   layer_id_t lockLayer;
-  KeyList *keysOnHold;
+  KeyList *waitingKeys;
   KeyList *keysBeingHeld;
   USB *usb;
   enum holdType holdType;
@@ -1443,7 +1443,7 @@ struct controller {
   uint32_t timedTimestamp;
   Key *timedKey;
   Action delayedReleaseAction;
-  uint32_t holdTimeout;
+  uint32_t waitingKeyTimeout;
   modifier_t modifiers;
   bool wordLocked;
 };
@@ -1453,7 +1453,7 @@ void controller_init(Controller *self, USB *usb)
   self->usb = usb;
   self->currentLayer = self->baseLayer = COLEMAK;
   self->lockLayer = NO_LAYER;
-  self->keysOnHold = KeyList_create();
+  self->waitingKeys = KeyList_create();
   self->keysBeingHeld = KeyList_create();
   self->holdType = noHoldType;
   self->holdSide = noSide;
@@ -1592,59 +1592,53 @@ void controller__pressKey(Controller *self, Key *key)
 
 void controller__releaseKey(Controller *self, Key *key)
 {
-  log(LOG_T, "releaseKey %s %s", key_description(key), action_description(key_releaseAction(key)));
-  keyList_removeKey(self->keysBeingHeld, key);
-  if (keyList_empty(self->keysBeingHeld)) {
-    self->holdSide = noSide;
+  Action *action = key_releaseAction(key);
+  log(LOG_T, "releaseKey %s %s", key_description(key), action_description(action));
+  if (self->holdSide != noSide) {
+    keyList_removeKey(self->keysBeingHeld, key);
+    if (keyList_empty(self->keysBeingHeld)) {
+      self->holdSide = noSide;
+    }
   }
-  action_actuate(key_releaseAction(key), key, self);
+  action_actuate(action, key, self);
   key_setReleaseAction(key, Action_noAction());
 }
 
-void controller__resetHoldTimeout(Controller *self)
+void controller__resetWaitingKeyTimeout(Controller *self)
 {
-  if (!keyList_empty(self->keysOnHold)) {
-    self->holdTimeout = board_millis() + 333;
-    if (self->holdTimeout == 0) self->holdTimeout++;
+  if (!keyList_empty(self->waitingKeys)) {
+    self->waitingKeyTimeout = board_millis() + 333;
+    if (self->waitingKeyTimeout == 0) self->waitingKeyTimeout = 1;
   } else {
-    self->holdTimeout = 0;
+    self->waitingKeyTimeout = 0;
   }
 }
 
 void controller_keyPressed(Controller *self, Key *key)
 {
   log(LOG_T, "keyPressed: %s", key_description(key));
-  if (!keyList_empty(self->keysOnHold)) {
-    log(LOG_T, " on hold2");
-    keyList_insertKey(self->keysOnHold, key);
-    controller__resetHoldTimeout(self);
-  } else {
+  if (keyList_empty(self->waitingKeys)) {
     Action *action = &layer[self->currentLayer][key_id(key)];
     if (action_holdType(action) == noHoldType) {
       log(LOG_T, " press action: %s", action_description(action));
       controller__pressKey(self, key);
     } else {
-      log(LOG_T, "on hold1");
-      keyList_insertKey(self->keysOnHold, key);
-      controller__resetHoldTimeout(self);
+      log(LOG_T, "key wait 1");
+      keyList_insertKey(self->waitingKeys, key);
+      controller__resetWaitingKeyTimeout(self);
     }
+  } else {
+    log(LOG_T, " key wait 2");
+    keyList_insertKey(self->waitingKeys, key);
+    controller__resetWaitingKeyTimeout(self);
   }
 }
 
-void controller_holdKeysOnHold(Controller *self)
+void controller_holdWaitingKeysUntilKey(Controller *self, Key *lastKey)
 {
-  self->holdSide = key_side(keyList_firstKey(self->keysOnHold));
-  while (!keyList_empty(self->keysOnHold)) {
-    Key *key = keyList_removeFirstKey(self->keysOnHold);
-    controller__pressKey(self, key);
-  }
-}
-
-void controller_holdKeysOnHoldUntilKey(Controller *self, Key *lastKey)
-{
-  self->holdSide = key_side(keyList_firstKey(self->keysOnHold));
-  while (!keyList_empty(self->keysOnHold)) {
-    Key *key = keyList_removeFirstKey(self->keysOnHold);
+  self->holdSide = key_side(keyList_firstKey(self->waitingKeys));
+  while (!keyList_empty(self->waitingKeys)) {
+    Key *key = keyList_removeFirstKey(self->waitingKeys);
     controller__pressKey(self, key);
     if (key == lastKey) {
       break;
@@ -1657,25 +1651,20 @@ void controller_keyReleased(Controller *self, Key *key)
   Action delayedAction = self->delayedReleaseAction;
   self->delayedReleaseAction = Action_noAction();
   log(LOG_T, "keyReleased: %s", key_description(key));
-  if (keyList_containsKey(self->keysOnHold, key)) {
-    log(LOG_T, " was on hold");
-    Key *firstKey = keyList_firstKey(self->keysOnHold);
+  if (keyList_containsKey(self->waitingKeys, key)) {
+    log(LOG_T, " was waiting");
+    Key *firstKey = keyList_firstKey(self->waitingKeys);
     if (firstKey == key) { // it's a tap
       log(LOG_T, " it's a tap (%s)", key_description(key));
-      keyList_removeFirstKey(self->keysOnHold);
+      keyList_removeFirstKey(self->waitingKeys);
       controller__pressKey(self, key);
-      controller__releaseKey(self, key);
-      controller__resetHoldTimeout(self);
     } else { // it's a hold
       log(LOG_T, " it's a hold (%s, first %s)", key_description(key), key_description(firstKey));
-      controller_holdKeysOnHoldUntilKey(self, key);
-      controller__releaseKey(self, key);
-      controller__resetHoldTimeout(self);
+      controller_holdWaitingKeysUntilKey(self, key);
     }
-  } else {
-    log(LOG_T, " was not held");
-    controller__releaseKey(self, key);
+    controller__resetWaitingKeyTimeout(self);
   }
+  controller__releaseKey(self, key);
   log(LOG_T, " delayed action %s", action_description(&delayedAction));
   action_actuate(&delayedAction, key, self);
 }
@@ -1854,7 +1843,7 @@ void controller_doCommand(Controller *self, int command)
   }
   printf("%s(%d) not implemented\n", __func__, command);
   printf("Layers: current=%d base=%d\n", self->currentLayer, self->baseLayer);
-  printf("on hold: "); keyList_print(self->keysOnHold);
+  printf("waiting: "); keyList_print(self->waitingKeys);
   printf("being held: "); keyList_print(self->keysBeingHeld);
   self->currentLayer = self->baseLayer = COLEMAK;
 }
@@ -1873,10 +1862,10 @@ void controller_task(Controller *self)
     self->timedTimestamp = 0;
     action_actuate(&(self->timedAction), self->timedKey, self);
   }
-  if (self->holdTimeout != 0 && board_millis() >= self->holdTimeout) {
-    self->holdTimeout = 0;
+  if (self->waitingKeyTimeout != 0 && board_millis() >= self->waitingKeyTimeout) {
+    self->waitingKeyTimeout = 0;
     log(LOG_T, "hold timeout");
-    controller_holdKeysOnHold(self);
+    controller_holdWaitingKeysUntilKey(self, NULL);
   }
 }
 
