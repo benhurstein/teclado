@@ -81,11 +81,22 @@ typedef enum {
   K_STOP    = 0x78,  K_REDO,    K_UNDO,    K_CUT,
   K_COPY    = 0x7C,  K_PASTE,   K_FIND,    K_MUTE,
   K_VOLUP   = 0x80,  K_VOLDOWN,
-// etc
+// modifiers
   K_CTRL    = 0xE0,  K_SHFT,    K_ALT,     K_GUI,
   K_RCTRL   = 0xE4,  K_RSHFT,   K_RALT,    K_RGUI,
+// compose alias
   K_COMPOSE = K_RGUI,
 } keycode_t;
+
+bool keycode_is_modifier(keycode_t keycode)
+{
+  return keycode >= 0xE0 && keycode <= 0xE7;
+}
+
+modifier_t keycode_to_modifier(keycode_t keycode)
+{
+  return 1 << (keycode - 0xE0);
+}
 
 typedef enum {
     but_left     = 0b00001,
@@ -133,10 +144,22 @@ const struct mod_key { modifier_t mod; keycode_t key; } ascii_to_mod_key[] = {
 
 
 // definitions  {{{1
+typedef struct usb USB;
 typedef struct controller Controller;
 typedef struct key Key;
 typedef struct action Action;
-typedef struct usb USB;
+
+void usb_init(USB *self);
+void usb_task(USB *self);
+void usb_setModifiers(USB *self, modifier_t new_modifiers);
+void usb_pressKeycode(USB *self, keycode_t keycode);
+void usb_releaseKeycode(USB *self, keycode_t keycode);
+bool usb_isCapsLocked(USB *self);
+void usb_pressMouseButton(USB *self, button_t button);
+void usb_releaseMouseButton(USB *self, button_t button);
+void usb_moveMouse(USB *self, int8_t v, int8_t h, int8_t wv, int8_t wh);
+void usb_testConnection(USB *self);
+void USB_caps(bool locked);
 
 void controller_init(Controller *self, USB *usb);
 void controller_task(Controller *self);
@@ -851,16 +874,6 @@ void usb_testConnection(USB *self)
 void USB_caps(bool locked)
 {
   USB_singleton->capsLocked = locked;
-}
-
-bool keycode_is_modifier(keycode_t keycode)
-{
-  return keycode >= 0xE0 && keycode <= 0xE7;
-}
-
-modifier_t keycode_to_modifier(keycode_t keycode)
-{
-  return 1 << (keycode - 0xE0);
 }
 
 void usb_pressModifier(USB *self, modifier_t modifier)
