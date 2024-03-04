@@ -1709,13 +1709,16 @@ void controller__send_usb_press_ascii_char(Controller *self, uint8_t ch)
   if (mk.key != 0) {
     usb_setModifiers(self->usb, mk.mod|(self->modifiers & ~(SHFT|RSHFT)));
     usb_pressKeycode(self->usb, mk.key);
+    usb_setModifiers(self->usb, self->modifiers);
   }
 }
 void controller__send_usb_release_ascii_char(Controller *self, uint8_t ch)
 {
   struct mod_key mk = ascii_to_mod_key[ch];
   if (mk.key != 0) {
+    usb_setModifiers(self->usb, mk.mod|(self->modifiers & ~(SHFT|RSHFT)));
     usb_releaseKeycode(self->usb, mk.key);
+    usb_setModifiers(self->usb, self->modifiers);
   }
 }
 
@@ -1723,7 +1726,7 @@ void controller__send_usb_hex_nibble(Controller *self, uint8_t h)
 {
   uint8_t ch = h + '0';
   if (ch > '9') {
-    ch += 'A' - ('9' + 1);
+    ch += 'a' - ('9' + 1);
   }
   controller__send_usb_press_ascii_char(self, ch);
   controller__send_usb_release_ascii_char(self, ch);
@@ -1746,14 +1749,16 @@ void controller__send_usb_unicode_char(Controller *self, uint32_t uni)
     controller__send_usb_press_ascii_char(self, uni);
     controller__send_usb_release_ascii_char(self, uni);
   } else {
-    // send C-S-u unicode in hex — this works in linux
-    usb_setModifiers(self->usb, RSHFT|RCTRL);
+    // send C-S-u + unicode in hex + space — this works in linux
+    modifier_t save_modifiers = self->modifiers;
+    controller__set_modifiers(self, RCTRL | RSHFT);
     usb_pressKeycode(self->usb, K_U);
     usb_releaseKeycode(self->usb, K_U);
-    usb_setModifiers(self->usb, 0);
+    controller__set_modifiers(self, 0);
     controller__send_usb_hex(self, uni);
-    usb_pressKeycode(self->usb, K_SPC);
-    usb_releaseKeycode(self->usb, K_SPC);
+    controller__send_usb_press_ascii_char(self, ' ');
+    controller__send_usb_release_ascii_char(self, ' ');
+    controller__set_modifiers(self, save_modifiers);
   }
 }
 
