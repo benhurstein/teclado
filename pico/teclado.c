@@ -222,7 +222,7 @@ enum holdType action_holdType(Action *self);
 #define LOG_K 0b01000000
 #define LOG_L 0b10000000
 
-uint8_t log_level = LOG_L;//LOG_E | LOG_T | LOG_R;
+uint8_t log_level = LOG_L | LOG_R | LOG_C;
 
 void log_set_level(uint8_t new_level)
 {
@@ -230,7 +230,7 @@ void log_set_level(uint8_t new_level)
 }
 
 #define log(level, ...) \
-    if ((level & log_level)) { \
+    if ((level) & (log_level)) { \
       printf(__VA_ARGS__); \
       putchar_raw('\n'); \
       fflush(stdout); \
