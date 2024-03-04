@@ -619,11 +619,11 @@ Action layer[][36] = {
     KOL(K_ENT,COL_ACC), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
   },
   [COL_ACC] = {
-    STR("'"       ), ASC('"', '\'' ), KEY(K_F       ), STR("ª"       ), STR("BenhurUFSM"),
+    ASC('\'', '`' ), ASC('"', '~'  ), STR("«"       ), STR("»"       ), STR("ª"       ),
     STR("á"       ), STR("à"       ), KEY(K_S       ), KOM(K_T,SHFT  ), KEY(K_G       ),
     STR("â"       ), STR("ã"       ), STR("ç"       ), KEY(K_D       ), KEY(K_V       ),
     KOL(K_ESC,MOUSE),KOL(K_SPC,NAV ), KOL(K_TAB,NUM ),
-    KEY(K_J       ), STR("º"       ), STR("ú"       ), KEY(K_APOSTR  ), KEY(K_COMPOSE ),
+    STR("º"       ), STR("€"       ), STR("ú"       ), KEY(K_Y       ), KEY(K_COMPOSE ),
     KEY(K_M       ), SOM("ñ",SHFT  ), STR("é"       ), STR("í"       ), STR("ó"       ),
     KEY(K_K       ), KEY(K_H       ), STR("ê"       ), STR("õ"       ), STR("ô"       ),
     KOL(K_ENT,NUM2), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
