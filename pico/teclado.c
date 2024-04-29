@@ -182,12 +182,10 @@ void usb_task(USB *self);
 void usb_setModifiers(USB *self, modifier_t new_modifiers);
 void usb_pressKeycode(USB *self, keycode_t keycode);
 void usb_releaseKeycode(USB *self, keycode_t keycode);
-bool usb_isCapsLocked(USB *self);
 void usb_pressMouseButton(USB *self, button_t button);
 void usb_releaseMouseButton(USB *self, button_t button);
 void usb_moveMouse(USB *self, int8_t v, int8_t h, int8_t wv, int8_t wh);
 void usb_testConnection(USB *self);
-void USB_caps(bool locked);
 
 void controller_init(Controller *self, USB *usb);
 void controller_task(Controller *self);
@@ -862,7 +860,6 @@ struct usb {
   uint8_t modifiers;
   uint8_t sent_modifiers;
   button_t buttons;
-  bool capsLocked;
 };
 
 USB *USB_singleton;
@@ -876,7 +873,6 @@ void usb_init(USB *self)
   self->n_keycodes = 0;
   memset(self->keycodes, 0, 6);
   self->buttons = 0;
-  self->capsLocked = false;
 
   tusb_init();
 }
@@ -904,11 +900,6 @@ void usb_testConnection(USB *self)
   } else if (uart_receive_usb_side()) {
     usbSide = otherSide;
   }
-}
-
-void USB_caps(bool locked)
-{
-  USB_singleton->capsLocked = locked;
 }
 
 void usb_pressModifier(USB *self, modifier_t modifier)
@@ -1045,11 +1036,6 @@ void usb__sendModifierReleases(USB *self)
     break;
   }
   usb_sendReport(self);
-}
-
-bool usb_isCapsLocked(USB *self)
-{
-  return self->capsLocked;
 }
 
 void usb_task(USB *self)
@@ -1494,10 +1480,12 @@ struct controller {
   Action delayedReleaseAction;
   modifier_t modifiers;
   bool wordLocked;
-};
+  bool capsLocked;
+} *controller_singleton;
 
 void controller_init(Controller *self, USB *usb)
 {
+  controller_singleton = self;
   self->usb = usb;
   self->currentLayer = self->baseLayer = COLEMAK;
   self->lockLayer = NO_LAYER;
@@ -1509,6 +1497,7 @@ void controller_init(Controller *self, USB *usb)
   self->delayedReleaseAction = Action_noAction();
   self->modifiers = 0;
   self->wordLocked = false;
+  self->capsLocked = false;
 }
 
 // auxiliary functions for wordLock  {{{2
@@ -1540,10 +1529,20 @@ bool keycode_in_word_invert_shift(keycode_t keycode)
 }
 // }}}
 
+void controller_set_led(Controller *self)
+{
+  led_set_rgb(0, self->capsLocked ? 15 : 0, self->wordLocked ? 15 : 0);
+}
+void Controller_set_capslock(bool newVal)
+{
+  controller_singleton->capsLocked = newVal;
+  controller_set_led(controller_singleton);
+}
+
 void static controller__setWordLocked(Controller *self, bool newVal)
 {
   self->wordLocked = newVal;
-  led_set_rgb(0, 0, self->wordLocked ? 20 : 0);
+  controller_set_led(self);
 }
 
 void controller__set_modifiers(Controller *self, modifier_t new_modifiers)
@@ -1806,7 +1805,7 @@ void controller__send_usb_unicode_char(Controller *self, unicode uni)
 
 void controller__send_utf8_str(Controller *self, char s[])
 {
-  bool capsLocked = usb_isCapsLocked(self->usb);
+  bool capsLocked = self->capsLocked;
   bool shifted = controller__is_shifted(self);
   if (capsLocked) {
     usb_pressKeycode(self->usb, K_CAPS);
@@ -2140,11 +2139,11 @@ int main()
   localReader_init(&localReader, &controller);
   mySide = localReader_keyboardSide(&localReader);
   if (mySide == noSide) fatal("Cannot determine keyboard side");
-  otherSide = mySide == leftSide ? rightSide : leftSide;
+  otherSide = (mySide == leftSide) ? rightSide : leftSide;
   remoteReader_init(&remoteReader, &controller, otherSide);
 
   uint32_t t0 = time_us_32();
-  while (usbSide == noSide && time_us_32() - t0 < 1000000) {
+  while (usbSide == noSide && time_us_32() - t0 < 10000000) {
     usb_testConnection(&usb);
   }
   if (usbSide == noSide) fatal("Did not detect USB connection");
@@ -2376,14 +2375,12 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
       {
         // Capslock On: disable blink, turn led on
         printf("capslock on\n");
-        board_led_write(true);
-        USB_caps(true);
+        Controller_set_capslock(true);
       }else
       {
         // Caplocks Off: back to normal blink
         printf("capslock off\n");
-        USB_caps(false);
-        board_led_write(false);
+        Controller_set_capslock(false);
       }
     }
   }
