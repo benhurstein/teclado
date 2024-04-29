@@ -15,7 +15,6 @@
 #include "tusb.h"
 #include "usb_descriptors.h"
 
-// constants+types+globals  {{{1
 // configuration {{{1
 #define SENSITIVITY 6
 
@@ -161,6 +160,8 @@ const struct mod_key { modifier_t mod; keycode_t key; } ascii_to_mod_key[] = {
   [0x7C] = {SHFT, K_BKSLASH }, {SHFT, K_RBRAKT}, {SHFT, K_GRAVE }, {0,    K_DEL   },//|}~
 };
 
+// for a codepoint in unicode -- 0 to 0x10FFFF
+typedef uint32_t unicode;
 
 // definitions  {{{1
 typedef struct usb USB;
@@ -1406,10 +1407,10 @@ bool keyList_containsKey(KeyList *self, Key *key)
 
 // auxiliary functions for unicode  {{{1
 //   very basic support for á->Á and finding a codepoint in a utf8 str
-uint32_t uni_to_upper(uint32_t lower)
+unicode unicode_to_upper(unicode lower)
 {
-  uint32_t upper = lower;
-  if (lower >= 0x61 && lower <= 0x7e) upper = lower - 0x20;
+  unicode upper = lower;
+  if (lower >= 'a' && lower <= 'z') upper = lower - 0x20;
   else if (lower >= 0xe0 && lower <= 0xfe && lower != 0xf7) upper = lower - 0x20;
   else if (lower == 0xff) upper = 0x178;
   else if (lower >= 0x100 && lower <= 0x137 && (lower&1) == 1) upper = lower - 1;
@@ -1496,13 +1497,13 @@ void controller_init(Controller *self, USB *usb)
 }
 
 // auxiliary functions for wordLock  {{{2
-bool uni_in_word(uint32_t uni)
+bool uni_in_word(unicode uni)
 {
   if (uni == '_') return true;
   if (uni >= '0' && uni <= '9') return true;
   if (uni >= 'a' && uni <= 'z') return true;
   if (uni >= 'A' && uni <= 'Z') return true;
-  if (uni != uni_to_upper(uni) /*|| uni != uni_to_lower(uni)*/) return true;
+  if (uni != unicode_to_upper(uni) /*|| uni != uni_to_lower(uni)*/) return true;
   return false;
 }
 
@@ -1762,13 +1763,13 @@ void controller__send_usb_hex(Controller *self, uint32_t hex)
     }
   }
 }
-void controller__send_usb_unicode_char(Controller *self, uint32_t uni)
+void controller__send_usb_unicode_char(Controller *self, unicode uni)
 {
   if (uni < 128) {
     controller__send_usb_press_ascii_char(self, uni);
     controller__send_usb_release_ascii_char(self, uni);
   } else {
-    // send C-S-u + unicode in hex + space — this works in linux
+    // send C-S-u + unicode in hex + space — this usually works in linux
     modifier_t save_modifiers = self->modifiers;
     controller__set_modifiers(self, RCTRL | RSHFT);
     usb_pressKeycode(self->usb, K_U);
@@ -1791,11 +1792,11 @@ void controller__send_utf8_str(Controller *self, char s[])
   }
   log(LOG_T, "shift:%d(%02x) caps:%d", shifted, self->usb->sent_modifiers, capsLocked);
   while (true) {
-    uint32_t u = unicode_from_utf8(s);
-    if (u == 0) break;
-    if (self->wordLocked && !uni_in_word(u)) controller__setWordLocked(self, false);
-    if (shifted ^ capsLocked ^ self->wordLocked) u = uni_to_upper(u);
-    controller__send_usb_unicode_char(self, u);
+    unicode uni = unicode_from_utf8(s);
+    if (uni == 0) break;
+    if (self->wordLocked && !uni_in_word(uni)) controller__setWordLocked(self, false);
+    if (shifted ^ capsLocked ^ self->wordLocked) uni = unicode_to_upper(uni);
+    controller__send_usb_unicode_char(self, uni);
     s += utf8_nbytes(s);
   }
   if (capsLocked) {
@@ -1808,7 +1809,7 @@ void controller__send_utf8_str(Controller *self, char s[])
 uint8_t controller__send_press_ascii_char(Controller *self, uint8_t ch)
 {
   if (self->wordLocked && !uni_in_word(ch)) controller__setWordLocked(self, false);
-  if (self->wordLocked) ch = uni_to_upper(ch);
+  if (self->wordLocked) ch = unicode_to_upper(ch);
   controller__send_usb_press_ascii_char(self, ch);
   usb_setModifiers(self->usb, self->modifiers);
   return ch;
