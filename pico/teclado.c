@@ -72,43 +72,43 @@ typedef enum {
 } modifier_t;
 
 typedef enum {
-  K_NONE    = 0x00,  K_ERR1,    K_ERR2,    K_ERR3,
-  K_A       = 0x04,  K_B,       K_C,       K_D,
-  K_E       = 0x08,  K_F,       K_G,       K_H,
-  K_I       = 0x0C,  K_J,       K_K,       K_L,
-  K_M       = 0x10,  K_N,       K_O,       K_P,
-  K_Q       = 0x14,  K_R,       K_S,       K_T,
-  K_U       = 0x18,  K_V,       K_W,       K_X,
-  K_Y       = 0x1C,  K_Z,       K_1,       K_2,
-  K_3       = 0x20,  K_4,       K_5,       K_6,
-  K_7       = 0x24,  K_8,       K_9,       K_0,
-  K_ENT     = 0x28,  K_ESC,     K_BS,      K_TAB,
-  K_SPC     = 0x2C,  K_MINUS,   K_EQUAL,   K_LBRAKT,
-  K_RBRAKT  = 0x30,  K_BKSLASH, K_SHARP,   K_SMCOL,
-  K_APOSTR  = 0x34,  K_GRAVE,   K_COMMA,   K_DOT,
-  K_SLASH   = 0x38,  K_CAPS,    K_F1,      K_F2,
-  K_F3      = 0x3C,  K_F4,      K_F5,      K_F6,
-  K_F7      = 0x40,  K_F8,      K_F9,      K_F10,
-  K_F11     = 0x44,  K_F12,     K_PRTSC,   K_SCRLK,
-  K_PAUSE   = 0x48,  K_INSERT,  K_HOME,    K_PGUP,
-  K_DEL     = 0x4C,  K_END,     K_PGDN,    K_RIGHT,
-  K_LEFT    = 0x50,  K_DOWN,    K_UP,      K_NUMLK,
-// keypad
-  K_EURO2   = 0x64,  K_APP,     K_POWER,
-// keypad, F13-24
-  K_STOP    = 0x78,  K_REDO,    K_UNDO,    K_CUT,
-  K_COPY    = 0x7C,  K_PASTE,   K_FIND,    K_MUTE,
-  K_VOLUP   = 0x80,  K_VOLDOWN,
-// modifiers
-  K_CTRL    = 0xE0,  K_SHFT,    K_ALT,     K_GUI,
-  K_RCTRL   = 0xE4,  K_RSHFT,   K_RALT,    K_RGUI,
-// compose alias
+  K_NONE    = 0x00, K_ERR1,    K_ERR2,    K_ERR3,
+  K_A       = 0x04, K_B,       K_C,       K_D,
+  K_E       = 0x08, K_F,       K_G,       K_H,
+  K_I       = 0x0C, K_J,       K_K,       K_L,
+  K_M       = 0x10, K_N,       K_O,       K_P,
+  K_Q       = 0x14, K_R,       K_S,       K_T,
+  K_U       = 0x18, K_V,       K_W,       K_X,
+  K_Y       = 0x1C, K_Z,       K_1,       K_2,
+  K_3       = 0x20, K_4,       K_5,       K_6,
+  K_7       = 0x24, K_8,       K_9,       K_0,
+  K_ENT     = 0x28, K_ESC,     K_BS,      K_TAB,
+  K_SPC     = 0x2C, K_MINUS,   K_EQUAL,   K_LBRAKT,
+  K_RBRAKT  = 0x30, K_BKSLASH, K_SHARP,   K_SMCOL,
+  K_APOSTR  = 0x34, K_GRAVE,   K_COMMA,   K_DOT,
+  K_SLASH   = 0x38, K_CAPS,    K_F1,      K_F2,
+  K_F3      = 0x3C, K_F4,      K_F5,      K_F6,
+  K_F7      = 0x40, K_F8,      K_F9,      K_F10,
+  K_F11     = 0x44, K_F12,     K_PRTSC,   K_SCRLK,
+  K_PAUSE   = 0x48, K_INSERT,  K_HOME,    K_PGUP,
+  K_DEL     = 0x4C, K_END,     K_PGDN,    K_RIGHT,
+  K_LEFT    = 0x50, K_DOWN,    K_UP,      K_NUMLK,
+  // keypad
+  K_EURO2   = 0x64, K_APP,     K_POWER,
+  // keypad, F13-24
+  K_STOP    = 0x78, K_REDO,    K_UNDO,    K_CUT,
+  K_COPY    = 0x7C, K_PASTE,   K_FIND,    K_MUTE,
+  K_VOLUP   = 0x80, K_VOLDOWN,
+  // modifiers
+  K_CTRL    = 0xE0, K_SHFT,    K_ALT,     K_GUI,
+  K_RCTRL   = 0xE4, K_RSHFT,   K_RALT,    K_RGUI,
+  // alias for compose key -- must configure this on OS
   K_COMPOSE = K_RGUI,
 } keycode_t;
 
 bool keycode_is_modifier(keycode_t keycode)
 {
-  return keycode >= 0xE0 && keycode <= 0xE7;
+  return keycode >= K_CTRL && keycode <= K_RGUI;
 }
 
 modifier_t keycode_to_modifier(keycode_t keycode)
@@ -117,53 +117,61 @@ modifier_t keycode_to_modifier(keycode_t keycode)
 }
 
 typedef enum {
-    but_left     = 0b00001,
-    but_right    = 0b00010,
-    but_middle   = 0b00100,
-    but_backward = 0b01000,
-    but_forward  = 0b10000,
+  but_left     = 0b00001,
+  but_right    = 0b00010,
+  but_middle   = 0b00100,
+  but_backward = 0b01000,
+  but_forward  = 0b10000,
 } button_t;
 
 // ascii to mod-key  {{{1
-const struct mod_key { modifier_t mod; keycode_t key; } ascii_to_mod_key[] = {
-  [0x00] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x04] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x08] = {0,    K_BS      }, {0,    K_TAB   }, {0,    K_ENT   }, {0,    0       },
-  [0x0C] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x10] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x14] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x18] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    K_ESC   },
-  [0x1C] = {0,    0         }, {0,    0       }, {0,    0       }, {0,    0       },
-  [0x20] = {0,    K_SPC     }, {SHFT, K_1     }, {SHFT, K_APOSTR}, {SHFT, K_3     },// !"#
-  [0x24] = {SHFT, K_4       }, {SHFT, K_5     }, {SHFT, K_7     }, {0,    K_APOSTR},//$%&'
-  [0x28] = {SHFT, K_9       }, {SHFT, K_0     }, {SHFT, K_8     }, {SHFT, K_EQUAL },//()*+
-  [0x2C] = {0,    K_COMMA   }, {0,    K_MINUS }, {0,    K_DOT   }, {0,    K_SLASH },//,-./
-  [0x30] = {0,    K_0       }, {0,    K_1     }, {0,    K_2     }, {0,    K_3     },//0123
-  [0x34] = {0,    K_4       }, {0,    K_5     }, {0,    K_6     }, {0,    K_7     },//4567
-  [0x38] = {0,    K_8       }, {0,    K_9     }, {SHFT, K_SMCOL }, {0,    K_SMCOL },//89:;
-  [0x3C] = {SHFT, K_COMMA   }, {0,    K_EQUAL }, {SHFT, K_DOT   }, {SHFT, K_SLASH },//<=>?
-  [0x40] = {SHFT, K_2       }, {SHFT, K_A     }, {SHFT, K_B     }, {SHFT, K_C     },//@ABC
-  [0x44] = {SHFT, K_D       }, {SHFT, K_E     }, {SHFT, K_F     }, {SHFT, K_G     },//DEFG
-  [0x48] = {SHFT, K_H       }, {SHFT, K_I     }, {SHFT, K_J     }, {SHFT, K_K     },//HIJK
-  [0x4C] = {SHFT, K_L       }, {SHFT, K_M     }, {SHFT, K_N     }, {SHFT, K_O     },//LMNO
-  [0x50] = {SHFT, K_P       }, {SHFT, K_Q     }, {SHFT, K_R     }, {SHFT, K_S     },//PQRS
-  [0x54] = {SHFT, K_T       }, {SHFT, K_U     }, {SHFT, K_V     }, {SHFT, K_W     },//TUVW
-  [0x58] = {SHFT, K_X       }, {SHFT, K_Y     }, {SHFT, K_Z     }, {0,    K_LBRAKT},//XYZ[
-  [0x5C] = {0,    K_BKSLASH }, {0,    K_RBRAKT}, {SHFT, K_6     }, {SHFT, K_MINUS },//\]^_
-  [0x60] = {0,    K_GRAVE   }, {0,    K_A     }, {0,    K_B     }, {0,    K_C     },//`abc
-  [0x64] = {0,    K_D       }, {0,    K_E     }, {0,    K_F     }, {0,    K_G     },//defg
-  [0x68] = {0,    K_H       }, {0,    K_I     }, {0,    K_J     }, {0,    K_K     },//hijk
-  [0x6C] = {0,    K_L       }, {0,    K_M     }, {0,    K_N     }, {0,    K_O     },//lmno
-  [0x70] = {0,    K_P       }, {0,    K_Q     }, {0,    K_R     }, {0,    K_S     },//pqrs
-  [0x74] = {0,    K_T       }, {0,    K_U     }, {0,    K_V     }, {0,    K_W     },//tuvw
-  [0x78] = {0,    K_X       }, {0,    K_Y     }, {0,    K_Z     }, {SHFT, K_LBRAKT},//xyz{
-  [0x7C] = {SHFT, K_BKSLASH }, {SHFT, K_RBRAKT}, {SHFT, K_GRAVE }, {0,    K_DEL   },//|}~
+typedef struct {
+  modifier_t mod;
+  keycode_t key;
+} mod_key;
+const mod_key ascii_to_mod_key[] = {
+  // table for US keyboard layout
+  // must change if OS is configured for a different layout
+#define S SHFT
+  [0x00] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
+  [0x04] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
+  [0x08] = {0,K_BS     }, {0,K_TAB   }, {0,K_ENT   }, {0,0       },
+  [0x0C] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
+  [0x10] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
+  [0x14] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
+  [0x18] = {0,0        }, {0,0       }, {0,0       }, {0,K_ESC   },
+  [0x1C] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
+  [0x20] = {0,K_SPC    }, {S,K_1     }, {S,K_APOSTR}, {S,K_3     }, //  !"#
+  [0x24] = {S,K_4      }, {S,K_5     }, {S,K_7     }, {0,K_APOSTR}, // $%&'
+  [0x28] = {S,K_9      }, {S,K_0     }, {S,K_8     }, {S,K_EQUAL }, // ()*+
+  [0x2C] = {0,K_COMMA  }, {0,K_MINUS }, {0,K_DOT   }, {0,K_SLASH }, // ,-./
+  [0x30] = {0,K_0      }, {0,K_1     }, {0,K_2     }, {0,K_3     }, // 0123
+  [0x34] = {0,K_4      }, {0,K_5     }, {0,K_6     }, {0,K_7     }, // 4567
+  [0x38] = {0,K_8      }, {0,K_9     }, {S,K_SMCOL }, {0,K_SMCOL }, // 89:;
+  [0x3C] = {S,K_COMMA  }, {0,K_EQUAL }, {S,K_DOT   }, {S,K_SLASH }, // <=>?
+  [0x40] = {S,K_2      }, {S,K_A     }, {S,K_B     }, {S,K_C     }, // @ABC
+  [0x44] = {S,K_D      }, {S,K_E     }, {S,K_F     }, {S,K_G     }, // DEFG
+  [0x48] = {S,K_H      }, {S,K_I     }, {S,K_J     }, {S,K_K     }, // HIJK
+  [0x4C] = {S,K_L      }, {S,K_M     }, {S,K_N     }, {S,K_O     }, // LMNO
+  [0x50] = {S,K_P      }, {S,K_Q     }, {S,K_R     }, {S,K_S     }, // PQRS
+  [0x54] = {S,K_T      }, {S,K_U     }, {S,K_V     }, {S,K_W     }, // TUVW
+  [0x58] = {S,K_X      }, {S,K_Y     }, {S,K_Z     }, {0,K_LBRAKT}, // XYZ[
+  [0x5C] = {0,K_BKSLASH}, {0,K_RBRAKT}, {S,K_6     }, {S,K_MINUS }, // \]^_
+  [0x60] = {0,K_GRAVE  }, {0,K_A     }, {0,K_B     }, {0,K_C     }, // `abc
+  [0x64] = {0,K_D      }, {0,K_E     }, {0,K_F     }, {0,K_G     }, // defg
+  [0x68] = {0,K_H      }, {0,K_I     }, {0,K_J     }, {0,K_K     }, // hijk
+  [0x6C] = {0,K_L      }, {0,K_M     }, {0,K_N     }, {0,K_O     }, // lmno
+  [0x70] = {0,K_P      }, {0,K_Q     }, {0,K_R     }, {0,K_S     }, // pqrs
+  [0x74] = {0,K_T      }, {0,K_U     }, {0,K_V     }, {0,K_W     }, // tuvw
+  [0x78] = {0,K_X      }, {0,K_Y     }, {0,K_Z     }, {S,K_LBRAKT}, // xyz{
+  [0x7C] = {S,K_BKSLASH}, {S,K_RBRAKT}, {S,K_GRAVE }, {0,K_DEL   }, // |}~
+#undef S
 };
 
 // for a codepoint in unicode -- 0 to 0x10FFFF
 typedef uint32_t unicode;
 
-// definitions  {{{1
+// interfaces  {{{1
 typedef struct usb USB;
 typedef struct controller Controller;
 typedef struct key Key;
@@ -290,33 +298,34 @@ typedef enum {
 
 // names for those actions (for debug messages)
 char *action_name[] = {
-  [no_action] = "no",
-  [key_action] = "key",
-  [asc_action] = "asc",
-  [str_action] = "str",
-  [mod_action] = "mod",
-  [layer_action] = "layer",
-  [base_layer_action] = "base_layer",
-  [hold_layer_action] = "hold_layer",
-  [once_layer_action] = "once_layer",
-  [lock_layer_action] = "lock_layer",
-  [key_or_mod_action] = "key_or_mod",
-  [str_or_mod_action] = "str_or_mod",
-  [key_or_layer_action] = "key_or_layer",
-  [str_or_layer_action] = "str_or_layer",
-  [mouse_move_action] = "mouse_move",
-  [mouse_button_action] = "mouse_button",
-  [command_action] = "command",
-
-  [rel_key_action] = "rel_key",
-  [rel_asc_action] = "rel_asc",
-  [rel_mod_action] = "rel_mod",
-  [rel_layer_action] = "rel_layer",
+  [no_action]             = "no",
+  // press actions
+  [key_action]            = "key",
+  [asc_action]            = "asc",
+  [str_action]            = "str",
+  [mod_action]            = "mod",
+  [layer_action]          = "layer",
+  [base_layer_action]     = "base_layer",
+  [hold_layer_action]     = "hold_layer",
+  [once_layer_action]     = "once_layer",
+  [lock_layer_action]     = "lock_layer",
+  [key_or_mod_action]     = "key_or_mod",
+  [str_or_mod_action]     = "str_or_mod",
+  [key_or_layer_action]   = "key_or_layer",
+  [str_or_layer_action]   = "str_or_layer",
+  [mouse_move_action]     = "mouse_move",
+  [mouse_button_action]   = "mouse_button",
+  [command_action]        = "command",
+  // release actions
+  [rel_key_action]        = "rel_key",
+  [rel_asc_action]        = "rel_asc",
+  [rel_mod_action]        = "rel_mod",
+  [rel_layer_action]      = "rel_layer",
   [rel_once_layer_action] = "rel_once_layer",
-  [rel_button_action] = "rel_button",
+  [rel_button_action]     = "rel_button",
 };
 
-// extra data for each action
+// additional data for each action
 typedef struct {
   keycode_t keycode;
 } key_action_t;
@@ -449,6 +458,7 @@ char *action_description(Action *a)
 
 void no_actuate(Action *self, Key *key, Controller *controller) {
 }
+// actuate on key press
 void key_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressKeycode(controller, self->key.keycode);
   key_setReleaseAction(key, REK(self->key.keycode));
@@ -485,10 +495,11 @@ void lock_layer_actuate(Action *self, Key *key, Controller *controller) {
   controller_lockLayer(controller, self->layer.layer_id);
   key_setReleaseAction(key, NO_ACTION);
 }
+// mouse
 void mouse_move_actuate(Action *self, Key *key, Controller *controller) {
   int val = key_val(key);
   if (key_val(key) != 0) {
-    int h=0, v=0, wh=0, wv=0;
+    int h = 0, v = 0, wh = 0, wv = 0;
     int interval;
     switch (self->mouse_move.move) {
       case mv_up   : v  = -val; interval =  50 - 3*val; break;
@@ -514,7 +525,7 @@ void command_actuate(Action *self, Key *key, Controller *controller) {
   key_setReleaseAction(key, NO_ACTION);
 }
 
-
+// actuate on key release
 void rel_key_actuate(Action *self, Key *key, Controller *controller) {
   controller_releaseKeycode(controller, self->key.keycode);
 }
@@ -539,7 +550,10 @@ Action Action_noAction(void)
   return NO_ACTION;
 }
 
-#define ACTION_CASE(action) case action##_action: action##_actuate(self, key, controller); break
+#define ACTION_CASE(action)                                                    \
+  case action##_action:                                                        \
+    action##_actuate(self, key, controller);                                   \
+    break
 void action_actuate(Action *self, Key *key, Controller *controller)
 {
   log(LOG_T, "actuate %s %s", key_description(key), action_description(self));
@@ -776,7 +790,8 @@ void keycodeq_insertData(Keycodeq *self, struct kcq_data data)
     log(LOG_E, "keycode queue full!");
     return;
   }
-  self->data[(self->first+self->count++)%KCQ_N] = data;
+  self->data[(self->first + self->count) % KCQ_N] = data;
+  self->count++;
   if (self->count > self->max_count) {
     self->max_count = self->count;
     log(LOG_I, "max keycode queue count: %d", self->max_count);
@@ -815,7 +830,7 @@ enum command keycodeq_remove(Keycodeq *self, keycode_t *keycode_p, modifier_t *m
   enum command command = self->data[self->first].command;
   *keycode_p = self->data[self->first].keycode;
   *modifier_p = self->data[self->first].modifier;
-  self->first = (self->first+1)%KCQ_N;
+  self->first = (self->first + 1) % KCQ_N;
   self->count--;
   return command;
 }
@@ -823,7 +838,7 @@ keycode_t keycodeq_removeKeycode(Keycodeq *self)
 {
   if (self->count == 0) return 0;
   keycode_t keycode = self->data[self->first].keycode;
-  self->first = (self->first+1)%KCQ_N;
+  self->first = (self->first + 1) % KCQ_N;
   self->count--;
   return keycode;
 }
@@ -831,7 +846,7 @@ modifier_t keycodeq_removeModifier(Keycodeq *self)
 {
   if (self->count == 0) return 0;
   modifier_t modifier = self->data[self->first].modifier;
-  self->first = (self->first+1)%KCQ_N;
+  self->first = (self->first + 1) % KCQ_N;
   self->count--;
   return modifier;
 }
@@ -978,14 +993,14 @@ void usb_moveMouse(USB *self, int8_t v, int8_t h, int8_t wv, int8_t wh)
 
 void usb__removeKeycodeAt(USB *self, int8_t i)
 {
-  if (self->n_keycodes < i+1) return;
+  if (self->n_keycodes < i + 1) return;
   self->n_keycodes--;
   memmove(&self->keycodes[i], &self->keycodes[i+1], self->n_keycodes - i);
   self->keycodes[self->n_keycodes] = 0;
 }
 void usb__removeKeycode(USB *self, keycode_t keycode)
 {
-  for (int i=0; i<self->n_keycodes; i++) {
+  for (int i = 0; i < self->n_keycodes; i++) {
     if (self->keycodes[i] == keycode) {
       usb__removeKeycodeAt(self, i);
       i--;
@@ -1064,8 +1079,8 @@ void usb_task(USB *self)
 // UART  {{{1
 void uart_send_key_val(uint8_t keyId, uint8_t val)
 {
-  uint8_t b0 = val+0xA0;
-  uint8_t b1 = keyId+0x50;
+  uint8_t b0 = val + 0xA0;
+  uint8_t b1 = keyId + 0x50;
   uint8_t b2 = b0 ^ b1;
   uart_putc_raw(UART_ID, 0);
   uart_putc_raw(UART_ID, b0);
@@ -1136,7 +1151,7 @@ struct key {
   //   a key press/release is recognized relative to these values
   int8_t minVal;
   int8_t maxVal;
-  // what to do when key is actuated
+  // what to do when key is released
   Action releaseAction;
 };
 
@@ -1451,7 +1466,7 @@ uint32_t unicode_from_utf8(char *p)
     case 4:
       return ((p[0] & 0b00000111) << 18)
            | ((p[1] & 0b00111111) << 12)
-           | ((p[2] & 0b00111111) << 6)
+           | ((p[2] & 0b00111111) <<  6)
            |  (p[3] & 0b00111111);
     default:
       return 0; // error!
@@ -1467,16 +1482,16 @@ struct controller {
   layer_id_t currentLayer;
   layer_id_t baseLayer;
   layer_id_t lockLayer;
+  USB *usb;
   KeyList *waitingKeys;
   KeyList *keysBeingHeld;
-  USB *usb;
+  uint32_t waitingKeyTimeout;
   enum holdType holdType;
   keyboardSide holdSide;
   Action timedAction;
   uint32_t timedTimestamp;
   Key *timedKey;
   Action delayedReleaseAction;
-  uint32_t waitingKeyTimeout;
   modifier_t modifiers;
   bool wordLocked;
 };
@@ -1509,6 +1524,7 @@ bool uni_in_word(unicode uni)
 
 bool keycode_in_word(keycode_t keycode, bool shifted)
 {
+  // NOTE: review this if keyboard layout configured in OS is not US
   if (keycode == K_MINUS && shifted) return true;
   if (keycode == K_0 && !shifted) return true;
   if (keycode >= K_1 && keycode <= K_9 && !shifted) return true;
@@ -1548,7 +1564,7 @@ void controller__remove_modifiers(Controller *self, modifier_t new_modifiers)
 
 bool controller__is_shifted(Controller *self)
 {
-  return (self->modifiers & (SHFT|RSHFT)) != 0;
+  return (self->modifiers & (SHFT | RSHFT)) != 0;
 }
 
 void controller__send_press_keycode(Controller *self, keycode_t keycode)
@@ -1725,21 +1741,27 @@ void controller_releaseKeycode(Controller *self, keycode_t keycode)
 
 void controller__send_usb_press_ascii_char(Controller *self, uint8_t ch)
 {
-  struct mod_key mk = ascii_to_mod_key[ch];
-  if (mk.key != 0) {
-    usb_setModifiers(self->usb, mk.mod|(self->modifiers & ~(SHFT|RSHFT)));
-    usb_pressKeycode(self->usb, mk.key);
-    usb_setModifiers(self->usb, self->modifiers);
-  }
+  mod_key mk = ascii_to_mod_key[ch];
+  if (mk.key == 0) return;
+  // remove SHIFT from current modifiers, add SHIFT from table
+  // NOTE: must change if keyboard layout needs other modifier for some ascii chars
+  modifier_t mod = self->modifiers & ~(SHFT | RSHFT);
+  mod |= mk.mod;
+  usb_setModifiers(self->usb, mod);
+  usb_pressKeycode(self->usb, mk.key);
+  usb_setModifiers(self->usb, self->modifiers);
 }
 void controller__send_usb_release_ascii_char(Controller *self, uint8_t ch)
 {
-  struct mod_key mk = ascii_to_mod_key[ch];
-  if (mk.key != 0) {
-    usb_setModifiers(self->usb, mk.mod|(self->modifiers & ~(SHFT|RSHFT)));
-    usb_releaseKeycode(self->usb, mk.key);
-    usb_setModifiers(self->usb, self->modifiers);
-  }
+  mod_key mk = ascii_to_mod_key[ch];
+  if (mk.key == 0) return;
+  // remove SHIFT from current modifiers, add SHIFT from table
+  // NOTE: must change if keyboard layout needs other modifier for some ascii chars
+  modifier_t mod = self->modifiers & ~(SHFT | RSHFT);
+  mod |= mk.mod;
+  usb_setModifiers(self->usb, mod);
+  usb_releaseKeycode(self->usb, mk.key);
+  usb_setModifiers(self->usb, self->modifiers);
 }
 
 void controller__send_usb_hex_nibble(Controller *self, uint8_t h)
