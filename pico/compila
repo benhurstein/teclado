@@ -1,0 +1,1 @@
+make -C build/ ; while ! [ -e /run/media/benhur/RPI-RP2 ]; do echo esperando; sleep 1; done; cp build/teclado.uf2 /run/media/benhur/RPI-RP2/
