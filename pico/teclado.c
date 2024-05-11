@@ -1833,11 +1833,46 @@ static void controller__sendUsbHex(Controller *self, uint32_t hex)
     }
   }
 }
+char compose_table[][2] = {
+  "  ", "!!", "|c", "-L", "ox", "=Y", "!^", "so", // A0  ¡¢£¤¥¦§
+  "\" ","OC", "\0", "<<", "-,", "\0", "OR", "-^", // A8 ¨©ª«¬­®¯
+  "oo", "+-", "^2", "^3", "''", "mu", "P!", "^.", // B0 °±²³´µ¶·
+  ",,", "^1", "\0", ">>", "14", "12", "34", "??", // B8 ¸¹º»¼½¾¿
+  "`A", "'A", "^A", "~A", "\"A","*A", "AE", ",C", // C0 ÀÁÂÃÄÅÆÇ
+  "`E", "'E", "^E", "\"E","`I", "'I", "^I", "\"I",// C8 ÈÉÊËÌÍÎÏ
+  "DH", "~N", "`O", "'O", "^O", "~O", "\"O","xx", // D0 ÐÑÒÓÔÕÖ×
+  "/O", "`U", "'U", "^U", "\"U","'Y", "TH", "ss", // D8 ØÙÚÛÜÝÞß
+  "`a", "'a", "^a", "~a", "\"a","*a", "ae", ",c", // E0 àáâãäåæç
+  "`e", "'e", "^e", "\"e","`i", "'i", "^i", "\"i",// E8 èéêëìíîï
+  "dh", "~n", "`o", "'o", "^o", "~o", "\"o",":-", // F0 ðñòóôõö÷
+  "/o", "`u", "'u", "^u", "\"u","'y", "th", "\"y",// F8 øùúûüýþÿ
+};
+static bool controller__hasComposeKeycodesForUnicode(Controller *self, unicode uni)
+{
+  if (uni < 0xA0 || uni > 0xFF) return false;
+  int i = uni - 0xA0;
+  if (compose_table[i][0] == '\0') return false;
+  return true;
+}
+static char *controller__composeKeycodesForUnicode(Controller *self, unicode uni)
+{
+  if (uni < 0xA0 || uni > 0xFF) return NULL;
+  int i = uni - 0xA0;
+  return compose_table[i];
+}
 static void controller__sendUsbUnicodeChar(Controller *self, unicode uni)
 {
   if (uni < 128) {
     controller__sendUsbPressAsciiChar(self, uni);
     controller__sendUsbReleaseAsciiChar(self, uni);
+  } else if (controller__hasComposeKeycodesForUnicode(self, uni)) {
+    char *compose_chars = controller__composeKeycodesForUnicode(self, uni);
+    usb_pressKeycode(self->usb, K_COMPOSE);
+    usb_releaseKeycode(self->usb, K_COMPOSE);
+    controller__sendUsbPressAsciiChar(self, compose_chars[0]);
+    controller__sendUsbReleaseAsciiChar(self, compose_chars[0]);
+    controller__sendUsbPressAsciiChar(self, compose_chars[1]);
+    controller__sendUsbReleaseAsciiChar(self, compose_chars[1]);
   } else {
     // send C-S-u + unicode in hex + space — this usually works in linux
     modifier_t save_modifiers = self->modifiers;
