@@ -1574,46 +1574,46 @@ bool keycode_in_word_invert_shift(keycode_t keycode)
 }
 // }}}
 
-static void controller_set_led(Controller *self)
+static void controller__setLed(Controller *self)
 {
   led_set_rgb(0, self->capsLocked ? 15 : 0, self->wordLocked ? 15 : 0);
 }
 void Controller_set_capslock(bool newVal)
 {
   controller_singleton->capsLocked = newVal;
-  controller_set_led(controller_singleton);
+  controller__setLed(controller_singleton);
 }
 
-void static controller__setWordLocked(Controller *self, bool newVal)
+static void controller__setWordLocked(Controller *self, bool newVal)
 {
   self->wordLocked = newVal;
-  controller_set_led(self);
+  controller__setLed(self);
 }
 
-void controller__set_modifiers(Controller *self, modifier_t new_modifiers)
+static void controller__setModifiers(Controller *self, modifier_t new_modifiers)
 {
   self->modifiers = new_modifiers;
   usb_setModifiers(self->usb, new_modifiers);
 }
 
-void controller__add_modifiers(Controller *self, modifier_t new_modifiers)
+static void controller__addModifiers(Controller *self, modifier_t new_modifiers)
 {
-  controller__set_modifiers(self, self->modifiers | new_modifiers);
+  controller__setModifiers(self, self->modifiers | new_modifiers);
 }
 
-void controller__remove_modifiers(Controller *self, modifier_t new_modifiers)
+static void controller__removeModifiers(Controller *self, modifier_t new_modifiers)
 {
-  controller__set_modifiers(self, self->modifiers & ~new_modifiers);
+  controller__setModifiers(self, self->modifiers & ~new_modifiers);
 }
 
-bool controller__is_shifted(Controller *self)
+static bool controller__isShifted(Controller *self)
 {
   return (self->modifiers & (SHFT | RSHFT)) != 0;
 }
 
-void controller__send_press_keycode(Controller *self, keycode_t keycode)
+static void controller__sendPressKeycode(Controller *self, keycode_t keycode)
 {
-  if (self->wordLocked && !keycode_in_word(keycode, controller__is_shifted(self))) {
+  if (self->wordLocked && !keycode_in_word(keycode, controller__isShifted(self))) {
     controller__setWordLocked(self, false);
   }
   if (self->wordLocked && keycode_in_word_invert_shift(keycode)) {
@@ -1625,7 +1625,7 @@ void controller__send_press_keycode(Controller *self, keycode_t keycode)
   usb_setModifiers(self->usb, self->modifiers);
 }
 
-void controller__send_release_keycode(Controller *self, keycode_t keycode)
+static void controller__sendReleaseKeycode(Controller *self, keycode_t keycode)
 {
   usb_setModifiers(self->usb, self->modifiers);
   usb_releaseKeycode(self->usb, keycode);
@@ -1663,7 +1663,7 @@ layer_id_t controller_baseLayer(Controller *self)
   return self->baseLayer;
 }
 
-void controller__pressKey(Controller *self, Key *key)
+static void controller__pressKey(Controller *self, Key *key)
 {
   Action action = layer[self->currentLayer][key_id(key)];
   if (action_isMouseMovementAction(&action)) {
@@ -1687,7 +1687,7 @@ void controller__pressKey(Controller *self, Key *key)
   action_actuate(&action, key, self);
 }
 
-void controller__releaseKey(Controller *self, Key *key)
+static void controller__releaseKey(Controller *self, Key *key)
 {
   Action *action = key_releaseAction(key);
   log(LOG_T, "releaseKey %s %s", key_description(key), action_description(action));
@@ -1701,7 +1701,7 @@ void controller__releaseKey(Controller *self, Key *key)
   key_setReleaseAction(key, Action_noAction());
 }
 
-void controller__resetWaitingKeyTimeout(Controller *self)
+static void controller__resetWaitingKeyTimeout(Controller *self)
 {
   if (!keyList_empty(self->waitingKeys)) {
     self->waitingKeyTimeout = board_millis() + 333;
@@ -1770,9 +1770,9 @@ void controller_pressKeycode(Controller *self, keycode_t keycode)
 {
   log(LOG_T, "%s(%d)", __func__, keycode);
   if (keycode_is_modifier(keycode)) {
-    controller__add_modifiers(self, keycode_to_modifier(keycode));
+    controller__addModifiers(self, keycode_to_modifier(keycode));
   } else {
-    controller__send_press_keycode(self, keycode);
+    controller__sendPressKeycode(self, keycode);
   }
 }
 
@@ -1780,14 +1780,14 @@ void controller_releaseKeycode(Controller *self, keycode_t keycode)
 {
   log(LOG_T, "%s(%d)", __func__, keycode);
   if (keycode_is_modifier(keycode)) {
-    controller__remove_modifiers(self, keycode_to_modifier(keycode));
+    controller__removeModifiers(self, keycode_to_modifier(keycode));
   } else {
-    controller__send_release_keycode(self, keycode);
+    controller__sendReleaseKeycode(self, keycode);
   }
 }
 
 
-void controller__send_usb_press_ascii_char(Controller *self, uint8_t ch)
+static void controller__sendUsbPressAsciiChar(Controller *self, uint8_t ch)
 {
   mod_key mk = ascii_to_mod_key[ch];
   if (mk.key == 0) return;
@@ -1799,7 +1799,7 @@ void controller__send_usb_press_ascii_char(Controller *self, uint8_t ch)
   usb_pressKeycode(self->usb, mk.key);
   usb_setModifiers(self->usb, self->modifiers);
 }
-void controller__send_usb_release_ascii_char(Controller *self, uint8_t ch)
+static void controller__sendUsbReleaseAsciiChar(Controller *self, uint8_t ch)
 {
   mod_key mk = ascii_to_mod_key[ch];
   if (mk.key == 0) return;
@@ -1812,50 +1812,50 @@ void controller__send_usb_release_ascii_char(Controller *self, uint8_t ch)
   usb_setModifiers(self->usb, self->modifiers);
 }
 
-void controller__send_usb_hex_nibble(Controller *self, uint8_t h)
+static void controller__sendUsbHexNibble(Controller *self, uint8_t h)
 {
   uint8_t ch = h + '0';
   if (ch > '9') {
     ch += 'a' - ('9' + 1);
   }
-  controller__send_usb_press_ascii_char(self, ch);
-  controller__send_usb_release_ascii_char(self, ch);
+  controller__sendUsbPressAsciiChar(self, ch);
+  controller__sendUsbReleaseAsciiChar(self, ch);
 }
 
-void controller__send_usb_hex(Controller *self, uint32_t hex)
+static void controller__sendUsbHex(Controller *self, uint32_t hex)
 {
   bool sent = false;
   for (int n = 7; n >= 0; n--) {
     uint8_t nib = (hex >> n*4) & 0b1111;
     if (nib != 0 || sent || n == 0) {
-      controller__send_usb_hex_nibble(self, nib);
+      controller__sendUsbHexNibble(self, nib);
       sent = true;
     }
   }
 }
-void controller__send_usb_unicode_char(Controller *self, unicode uni)
+static void controller__sendUsbUnicodeChar(Controller *self, unicode uni)
 {
   if (uni < 128) {
-    controller__send_usb_press_ascii_char(self, uni);
-    controller__send_usb_release_ascii_char(self, uni);
+    controller__sendUsbPressAsciiChar(self, uni);
+    controller__sendUsbReleaseAsciiChar(self, uni);
   } else {
     // send C-S-u + unicode in hex + space — this usually works in linux
     modifier_t save_modifiers = self->modifiers;
-    controller__set_modifiers(self, RCTRL | RSHFT);
+    controller__setModifiers(self, RCTRL | RSHFT);
     usb_pressKeycode(self->usb, K_U);
     usb_releaseKeycode(self->usb, K_U);
-    controller__set_modifiers(self, 0);
-    controller__send_usb_hex(self, uni);
-    controller__send_usb_press_ascii_char(self, ' ');
-    controller__send_usb_release_ascii_char(self, ' ');
-    controller__set_modifiers(self, save_modifiers);
+    controller__setModifiers(self, 0);
+    controller__sendUsbHex(self, uni);
+    controller__sendUsbPressAsciiChar(self, ' ');
+    controller__sendUsbReleaseAsciiChar(self, ' ');
+    controller__setModifiers(self, save_modifiers);
   }
 }
 
-void controller__send_utf8_str(Controller *self, char s[])
+static void controller__sendUtf8Str(Controller *self, char s[])
 {
   bool capsLocked = self->capsLocked;
-  bool shifted = controller__is_shifted(self);
+  bool shifted = controller__isShifted(self);
   if (capsLocked) {
     usb_pressKeycode(self->usb, K_CAPS);
     usb_releaseKeycode(self->usb, K_CAPS);
@@ -1866,7 +1866,7 @@ void controller__send_utf8_str(Controller *self, char s[])
     if (uni == 0) break;
     if (self->wordLocked && !uni_in_word(uni)) controller__setWordLocked(self, false);
     if (shifted ^ capsLocked ^ self->wordLocked) uni = unicode_to_upper(uni);
-    controller__send_usb_unicode_char(self, uni);
+    controller__sendUsbUnicodeChar(self, uni);
     s += utf8_nbytes(s);
   }
   if (capsLocked) {
@@ -1876,49 +1876,49 @@ void controller__send_utf8_str(Controller *self, char s[])
   usb_setModifiers(self->usb, self->modifiers);
 }
 
-uint8_t controller__send_press_ascii_char(Controller *self, uint8_t ch)
+static uint8_t controller__sendPressAsciiChar(Controller *self, uint8_t ch)
 {
   if (self->wordLocked && !uni_in_word(ch)) controller__setWordLocked(self, false);
   if (self->wordLocked) ch = unicode_to_upper(ch);
-  controller__send_usb_press_ascii_char(self, ch);
+  controller__sendUsbPressAsciiChar(self, ch);
   usb_setModifiers(self->usb, self->modifiers);
   return ch;
 }
 
-void controller__send_release_ascii_char(Controller *self, uint8_t ch)
+static void controller__sendReleaseAsciiChar(Controller *self, uint8_t ch)
 {
-  controller__send_usb_release_ascii_char(self, ch);
+  controller__sendUsbReleaseAsciiChar(self, ch);
   usb_setModifiers(self->usb, self->modifiers);
 }
 
 char controller_pressAscii(Controller *self, char unshifted_char, char shifted_char)
 {
-  log(LOG_T, "%s(%c,%c)S=%d", __func__, unshifted_char, shifted_char, controller__is_shifted(self));
-  char pressed_char = controller__is_shifted(self) ? shifted_char : unshifted_char;
-  return controller__send_press_ascii_char(self, pressed_char);
+  log(LOG_T, "%s(%c,%c)S=%d", __func__, unshifted_char, shifted_char, controller__isShifted(self));
+  char pressed_char = controller__isShifted(self) ? shifted_char : unshifted_char;
+  return controller__sendPressAsciiChar(self, pressed_char);
 }
 
 void controller_releaseAscii(Controller *self, char pressed)
 {
   log(LOG_T, "%s(%c)", __func__, pressed);
-  controller__send_release_ascii_char(self, pressed);
+  controller__sendReleaseAsciiChar(self, pressed);
 }
 
 void controller_pressString(Controller *self, char s[])
 {
   log(LOG_T, "%s(%c)", __func__, s[0]);
-  controller__send_utf8_str(self, s);
+  controller__sendUtf8Str(self, s);
 }
 
 void controller_pressModifier(Controller *self, modifier_t modifier)
 {
   log(LOG_T, "%s(%d)", __func__, modifier);
-  controller__add_modifiers(self, modifier);
+  controller__addModifiers(self, modifier);
 }
 void controller_releaseModifier(Controller *self, modifier_t modifier)
 {
   log(LOG_T, "%s(%d)", __func__, modifier);
-  controller__remove_modifiers(self, modifier);
+  controller__removeModifiers(self, modifier);
 }
 void controller_setDelayedReleaseAction(Controller *self, Action action)
 {
