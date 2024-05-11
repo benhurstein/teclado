@@ -17,6 +17,7 @@
 
 // configuration {{{1
 #define SENSITIVITY 6
+#define MOUSE_PERIOD 30
 
 #define UART_ID uart1
 #define BAUD_RATE 500000
@@ -26,6 +27,7 @@
 #define N_SEL_PINS 5
 #define N_ANA_PINS 4
 #define N_HWKEYS (N_SEL_PINS * N_ANA_PINS)
+#define N_KEYS 36
 
 uint8_t left_sel_pins[N_SEL_PINS] = { 14, 15, 3, 1, 0 };
 uint8_t right_sel_pins[N_SEL_PINS] = { 0, 1, 3, 6, 7 };
@@ -205,7 +207,6 @@ void controller_releaseMouseButton(Controller *self, button_t button);
 void controller_moveMouse(Controller *self, int v, int h, int wv, int wh);
 void controller_setDelayedReleaseAction(Controller *self, Action action);
 void controller_doCommand(Controller *self, int command);
-void controller_setTimedAction(Controller *self, Key *key, Action action, int interval_ms);
 void controller_keyPressed(Controller *self, Key *key);
 void controller_keyReleased(Controller *self, Key *key);
 
@@ -215,6 +216,7 @@ void controller_keyReleased(Controller *self, Key *key);
 //      if master, can call controller_keyPressed or controller_keyReleased
 //      if slave, sends val to master
 // when master receives new val from slave, calls setVal
+Key *Key_keyWithId(uint8_t swId);
 void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId);
 int8_t key_id(Key *self);
 keyboardSide key_side(Key *self);
@@ -232,6 +234,7 @@ Action Action_noAction(void);
 char *action_description(Action *a);
 void action_actuate(Action *self, Key *key, Controller *controller);
 bool action_isTypingAction(Action *self);
+bool action_isMouseMovementAction(Action *self);
 Action action_holdAction(Action *self);
 Action action_tapAction(Action *self);
 enum holdType action_holdType(Action *self);
@@ -248,7 +251,7 @@ enum holdType action_holdType(Action *self);
 #define LOG_K 0b01000000
 #define LOG_L 0b10000000
 
-uint8_t log_level = LOG_L | LOG_R | LOG_C;
+uint8_t log_level = LOG_T | LOG_R | LOG_C;
 
 void log_set_level(uint8_t new_level)
 {
@@ -496,23 +499,21 @@ void lock_layer_actuate(Action *self, Key *key, Controller *controller) {
 // mouse
 void mouse_move_actuate(Action *self, Key *key, Controller *controller) {
   int val = key_val(key);
-  if (key_val(key) != 0) {
-    int h = 0, v = 0, wh = 0, wv = 0;
-    int interval;
-    switch (self->mouse_move.move) {
-      case mv_up   : v  = -val; interval =  50 - 3*val; break;
-      case mv_down : v  = +val; interval =  50 - 3*val; break;
-      case mv_right: h  = +val; interval =  50 - 3*val; break;
-      case mv_left : h  = -val; interval =  50 - 3*val; break;
-      case wh_up   : wv =   +1; interval = 100; break;
-      case wh_down : wv =   -1; interval = 100; break;
-      case wh_right: wh =   +1; interval = 100; break;
-      case wh_left : wh =   -1; interval = 100; break;
-    }
-    controller_moveMouse(controller, v, h, wv, wh);
-    controller_setTimedAction(controller, key, *self, interval);
+  if (val == 0) return;
+  int h = 0, v = 0, wh = 0, wv = 0;
+  int move[] = { 0, 85, 170, 260, 360, 480, 640, 880, 1280, 2000 };
+  int wheel[] = { 0, 11, 22, 34, 48, 66, 92, 134, 208, 346 };
+  switch (self->mouse_move.move) {
+    case mv_up   : v  = -move[val]; break;
+    case mv_down : v  = +move[val]; break;
+    case mv_right: h  = +move[val]; break;
+    case mv_left : h  = -move[val]; break;
+    case wh_up   : wv = +wheel[val]; break;
+    case wh_down : wv = -wheel[val]; break;
+    case wh_right: wh = +wheel[val]; break;
+    case wh_left : wh = -wheel[val]; break;
   }
-  key_setReleaseAction(key, NO_ACTION);
+  controller_moveMouse(controller, v, h, wv, wh);
 }
 void mouse_button_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressMouseButton(controller, self->mouse_button.button);
@@ -605,6 +606,11 @@ bool action_isTypingAction(Action *self)
   }
 }
 
+bool action_isMouseMovementAction(Action *self)
+{
+  return self->action_type == mouse_move_action;
+}
+
 Action action_tapAction(Action *self)
 {
   switch (self->action_type) {
@@ -639,7 +645,7 @@ Action action_holdAction(Action *self)
 
 
 // layers  {{{1
-Action layer[][36] = {
+Action layer[][N_KEYS] = {
   [COLEMAK] = {
     KEY(K_Q       ), KEY(K_W       ), KEY(K_F       ), KEY(K_P       ), KEY(K_B       ),
     KOM(K_A,GUI   ), KOM(K_R,ALT   ), KOM(K_S,CTRL  ), KOM(K_T,SHFT  ), KEY(K_G       ),
@@ -731,6 +737,14 @@ Action layer[][36] = {
     NO_ACTION,       NO_ACTION,       NO_ACTION,
   },
 };
+
+bool layer_hasMouseMovementAction(layer_id_t layer_num)
+{
+  for (int k = 0; k < N_KEYS; k++) {
+    if (action_isMouseMovementAction(&layer[layer_num][k])) return true;
+  }
+  return false;
+}
 
 // WS2812 rgb led  {{{1
 
@@ -1141,6 +1155,13 @@ struct key {
   Action releaseAction;
 };
 
+Key *keys[N_KEYS];
+
+Key *Key_keyWithId(uint8_t swId)
+{
+  return keys[swId];
+}
+
 char *key_description(Key *self)
 {
   static char description[4];
@@ -1157,6 +1178,7 @@ void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId)
   self->val = 0;
   self->pressed = false;
   self->minVal = 0;
+  keys[swId] = self;
 }
 
 int8_t key_id(Key *self)
@@ -1474,26 +1496,49 @@ struct controller {
   uint32_t waitingKeyTimeout;
   enum holdType holdType;
   keyboardSide holdSide;
-  Action timedAction;
-  uint32_t timedTimestamp;
-  Key *timedKey;
+  uint32_t moveMouseTimeout;
+  int16_t mousePos_v;
+  int16_t mousePos_h;
+  int16_t mousePos_wv;
+  int16_t mousePos_wh;
   Action delayedReleaseAction;
   modifier_t modifiers;
   bool wordLocked;
   bool capsLocked;
 } *controller_singleton;
 
+static void controller__setMoveMouseTimeout(Controller *self, int interval_ms)
+{
+  if (interval_ms == 0) {
+    self->moveMouseTimeout = 0;
+  } else {
+    self->moveMouseTimeout = board_millis() + interval_ms;
+    if (self->moveMouseTimeout == 0) self->moveMouseTimeout++;
+  }
+}
+
+static void controller__setCurrentLayer(Controller *self, layer_id_t layer_id)
+{
+  self->currentLayer = layer_id;
+  if (layer_hasMouseMovementAction(layer_id)) {
+    controller__setMoveMouseTimeout(self, MOUSE_PERIOD);
+  } else {
+    controller__setMoveMouseTimeout(self, 0);
+  }
+}
 void controller_init(Controller *self, USB *usb)
 {
   controller_singleton = self;
+  memset(self, 0, sizeof(*self));
   self->usb = usb;
-  self->currentLayer = self->baseLayer = COLEMAK;
+  self->baseLayer = COLEMAK;
+  controller__setCurrentLayer(self, COLEMAK);
   self->lockLayer = NO_LAYER;
   self->waitingKeys = KeyList_create();
   self->keysBeingHeld = KeyList_create();
   self->holdType = noHoldType;
   self->holdSide = noSide;
-  self->timedTimestamp = 0;
+  self->moveMouseTimeout = 0;
   self->delayedReleaseAction = Action_noAction();
   self->modifiers = 0;
   self->wordLocked = false;
@@ -1529,7 +1574,7 @@ bool keycode_in_word_invert_shift(keycode_t keycode)
 }
 // }}}
 
-void controller_set_led(Controller *self)
+static void controller_set_led(Controller *self)
 {
   led_set_rgb(0, self->capsLocked ? 15 : 0, self->wordLocked ? 15 : 0);
 }
@@ -1590,7 +1635,7 @@ void controller_changeLayer(Controller *self, layer_id_t layer)
 {
   log(LOG_T, "%s(%d)", __func__, layer);
   if (self->lockLayer == NO_LAYER) {
-    self->currentLayer = layer;
+    controller__setCurrentLayer(self, layer);
   }
   log(LOG_T, "layer=%d base=%d lock=%d", self->currentLayer, self->baseLayer, self->lockLayer);
 }
@@ -1600,10 +1645,10 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
   log(LOG_T, "%s(%d)", __func__, layer);
   if (self->lockLayer == layer) {
     self->lockLayer = NO_LAYER;
-    self->currentLayer = self->baseLayer;
+    controller__setCurrentLayer(self, self->baseLayer);
   } else {
-    self->currentLayer = layer;
     self->lockLayer = layer;
+    controller__setCurrentLayer(self, layer);
   }
 }
 
@@ -1621,6 +1666,10 @@ layer_id_t controller_baseLayer(Controller *self)
 void controller__pressKey(Controller *self, Key *key)
 {
   Action action = layer[self->currentLayer][key_id(key)];
+  if (action_isMouseMovementAction(&action)) {
+    log(LOG_T, "ignoring mouse movement key press");
+    return;
+  }
   log(LOG_T, "pressKey %s %s", key_description(key), action_description(&action));
   key_setReleaseAction(key, Action_noAction()); // just in case...
   if (key_side(key) == self->holdSide) {
@@ -1871,6 +1920,12 @@ void controller_releaseModifier(Controller *self, modifier_t modifier)
   log(LOG_T, "%s(%d)", __func__, modifier);
   controller__remove_modifiers(self, modifier);
 }
+void controller_setDelayedReleaseAction(Controller *self, Action action)
+{
+  log(LOG_T, "set delayed");
+  log(LOG_T, "%s: %s", __func__, action_description(&action));
+  self->delayedReleaseAction = action;
+}
 
 void controller_pressMouseButton(Controller *self, button_t button)
 {
@@ -1882,15 +1937,45 @@ void controller_releaseMouseButton(Controller *self, button_t button)
 }
 void controller_moveMouse(Controller *self, int v, int h, int wv, int wh)
 {
-  //log(LOG_T, "controller move %d %d %d %d\n", v, h, wv, wh);
-  usb_moveMouse(self->usb, v, h, wv, wh);
+  // accumulate mouse movements (in centimickeys)
+  self->mousePos_v += v;
+  self->mousePos_h += h;
+  self->mousePos_wv += wv;
+  self->mousePos_wh += wh;
 }
-void controller_setDelayedReleaseAction(Controller *self, Action action)
+static void controller__sendMouseMovement(Controller *self)
 {
-  log(LOG_T, "set delayed");
-  log(LOG_T, "%s: %s", __func__, action_description(&action));
-  self->delayedReleaseAction = action;
+  // convert accumulated mouse movements in centimickeys to mickeys
+  int v = self->mousePos_v / 100;
+  int h = self->mousePos_h / 100;
+  int wv = self->mousePos_wv / 100;
+  int wh = self->mousePos_wh / 100;
+  log(LOG_T, "controller move %d %d %d %d\n", self->mousePos_v, self->mousePos_h, self->mousePos_wv, self->mousePos_wh);
+  if (v != 0 || h != 0 || wv != 0 || wh != 0) {
+    // remove used movements from accumulation
+    self->mousePos_v -= v * 100;
+    self->mousePos_h -= h * 100;
+    self->mousePos_wv -= wv * 100;
+    self->mousePos_wh -= wh * 100;
+    log(LOG_T, "controller move %d %d %d %d\n", v, h, wv, wh);
+    usb_moveMouse(self->usb, v, h, wv, wh);
+  }
 }
+static void controller__timedMoveMouse(Controller *self)
+{
+  // mouse move actions call controller_moveMouse, that accumulates the movements
+  for (uint8_t k = 0; k < N_KEYS; k++) {
+    Action *action = &layer[self->currentLayer][k];
+    if (action_isMouseMovementAction(action)) {
+      Key *key = Key_keyWithId(k);
+      action_actuate(action, key, self);
+    }
+  }
+  // send accumulated movements in one USB event
+  controller__sendMouseMovement(self);
+  controller__setMoveMouseTimeout(self, MOUSE_PERIOD);
+}
+
 void controller_doCommand(Controller *self, int command)
 {
   if (command == WORDLOCK) {
@@ -1904,22 +1989,15 @@ void controller_doCommand(Controller *self, int command)
   printf("Layers: current=%d base=%d\n", self->currentLayer, self->baseLayer);
   printf("waiting: "); keyList_print(self->waitingKeys);
   printf("being held: "); keyList_print(self->keysBeingHeld);
-  self->currentLayer = self->baseLayer = COLEMAK;
-}
-void controller_setTimedAction(Controller *self, Key *key, Action action, int interval_ms)
-{
-  // TODO there should be multiple simultaneous timeds, one per key
-  self->timedAction = action;
-  self->timedTimestamp = board_millis() + interval_ms;
-  if (self->timedTimestamp == 0) self->timedTimestamp++;
-  self->timedKey = key;
+  self->baseLayer = COLEMAK;
+  controller__setCurrentLayer(self, COLEMAK);
 }
 
 void controller_task(Controller *self)
 {
-  if (self->timedTimestamp != 0 && board_millis() >= self->timedTimestamp) {
-    self->timedTimestamp = 0;
-    action_actuate(&(self->timedAction), self->timedKey, self);
+  if (self->moveMouseTimeout != 0 && board_millis() >= self->moveMouseTimeout) {
+    self->moveMouseTimeout = 0;
+    controller__timedMoveMouse(self);
   }
   if (self->waitingKeyTimeout != 0 && board_millis() >= self->waitingKeyTimeout) {
     self->waitingKeyTimeout = 0;
