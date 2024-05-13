@@ -211,19 +211,14 @@ void controller_keyPressed(Controller *self, Key *key);
 void controller_keyReleased(Controller *self, Key *key);
 
 
-// local sequence of calls:
-//   newRaw -> calculateVal -> setVal -> valChanged
-//      if master, can call controller_keyPressed or controller_keyReleased
-//      if slave, sends val to master
-// when master receives new val from slave, calls setVal
 Key *Key_keyWithId(uint8_t swId);
 void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId);
 int8_t key_id(Key *self);
 keyboardSide key_side(Key *self);
 void key_setNewRaw(Key *self, uint16_t newRaw);
-void key_calculateVal(Key *self);
 void key_setVal(Key *self, uint8_t newVal);
 int8_t key_val(Key *self);
+void key_processChanges(Key *self);
 void key_setReleaseAction(Key *self, Action action);
 Action *key_releaseAction(Key *self);
 char *key_description(Key *self);
@@ -251,7 +246,7 @@ enum holdType action_holdType(Action *self);
 #define LOG_K 0b01000000
 #define LOG_L 0b10000000
 
-uint8_t log_level = LOG_T | LOG_R | LOG_C;
+uint8_t log_level = LOG_R | LOG_C;
 
 void log_set_level(uint8_t new_level)
 {
@@ -599,7 +594,7 @@ bool action_isTypingAction(Action *self)
   switch (self->action_type) {
     case key_action:
     case asc_action:
-    case str_action:
+    //case str_action:
       return true;
     default:
       return false;
@@ -723,7 +718,7 @@ Action layer[][N_KEYS] = {
     KEY(K_APP     ), KEY(K_SPC     ), KEY(K_TAB     ),
     NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       NO_ACTION,
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
-    NO_ACTION,       LCK(FUN       ), LCK(RAT     ), MOD(RALT      ), NO_ACTION,
+    NO_ACTION,       LCK(FUN       ), LCK(RAT       ), MOD(RALT      ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
   },
   [NUM2] = {
@@ -1138,7 +1133,7 @@ struct key {
   // higher level id, O-17 for left (0=Q,1=W), 18-35 for right (18=Y,19=U)
   int8_t swId;
   // last value read from sensor
-  uint16_t newRaw;
+  uint16_t rawValue;
   uint16_t minRawRange;
   // scaled values, for filtering
   uint32_t minRaw_S;
@@ -1153,6 +1148,8 @@ struct key {
   int8_t maxVal;
   // what to do when key is released
   Action releaseAction;
+  bool valChanged;
+  bool pressChanged;
 };
 
 Key *keys[N_KEYS];
@@ -1171,6 +1168,7 @@ char *key_description(Key *self)
 
 void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId)
 {
+  memset(self, 0, sizeof(*self));
   self->controller = controller;
   self->hwId = hwId;
   self->swId = swId;
@@ -1206,16 +1204,16 @@ static void filter_SnS(uint32_t *old_S, uint16_t new, uint8_t scale, uint8_t wei
 {
   filter_SS(old_S, ((uint32_t)new) << scale, weight);
 }
-void key__filterRawValues(Key *self)
+static void key__filterRawValue(Key *self)
 {
   if (self->filteredRaw_S == UINT32_MAX) {
     // if it's the first value, initialize
-    self->filteredRaw_S = self->newRaw << 13;
+    self->filteredRaw_S = self->rawValue << 13;
     self->maxRaw_S = self->filteredRaw_S;
     self->minRaw_S = self->filteredRaw_S;
     return;
   }
-  filter_SnS(&self->filteredRaw_S, self->newRaw, 13, 2);
+  filter_SnS(&self->filteredRaw_S, self->rawValue, 13, 2);
   // if value is outside of max or min limits, fast drift min or max to value
   if (self->filteredRaw_S < self->minRaw_S) {
     filter_SS(&self->minRaw_S, self->filteredRaw_S, 1);
@@ -1232,32 +1230,25 @@ void key__filterRawValues(Key *self)
   }
 }
 
-
-void key__valChanged(Key *self)
+void key_processChanges(Key *self)
 {
-  uint8_t newVal = self->val;
   if (self->swId == -1) return;
-  if (key_side(self) == mySide && mySide != usbSide) {
-    uart_send_key_val(self->hwId, self->val);
-    return;
-  }
-
-  if (self->pressed) {
-    self->maxVal = MAX(self->maxVal, newVal);
-    if (self->maxVal - newVal >= SENSITIVITY) {
-      self->pressed = false;
-      controller_keyReleased(self->controller, self);
-      self->minVal = newVal;
-    }
-  } else {
-    self->minVal = MIN(self->minVal, newVal);
-    if (newVal - self->minVal >= SENSITIVITY) {
-      self->pressed = true;
-      controller_keyPressed(self->controller, self);
-      self->maxVal = newVal;
+  if (self->valChanged) {
+    self->valChanged = false;
+    if (key_side(self) == mySide && mySide != usbSide) {
+      uart_send_key_val(self->hwId, self->val);
     }
   }
-  log(LOG_K, "valChanged -> m%d M%d p%d", self->minVal, self->maxVal, self->pressed);
+  if (self->pressChanged) {
+    self->pressChanged = false;
+    if (mySide == usbSide) {
+      if (self->pressed) {
+        controller_keyPressed(self->controller, self);
+      } else {
+        controller_keyReleased(self->controller, self);
+      }
+    }
+  }
 }
 
 int8_t key_val(Key *self)
@@ -1277,11 +1268,28 @@ Action *key_releaseAction(Key *self)
 
 void key_setVal(Key *self, uint8_t newVal)
 {
-  if (newVal != self->val) {
-    log(LOG_K, "newVal %d %d->%d", self->swId, self->val, newVal);
-    self->val = newVal;
-    key__valChanged(self);
+  if (self->swId == -1) return;
+  if (newVal == self->val) return;
+  self->val = newVal;
+  self->valChanged = true;
+
+  if (self->pressed) {
+    self->maxVal = MAX(self->maxVal, newVal);
+    if (self->maxVal - newVal >= SENSITIVITY) {
+      self->minVal = newVal;
+      self->pressed = false;
+      self->pressChanged = true;
+    }
+  } else {
+    self->minVal = MIN(self->minVal, newVal);
+    if (newVal - self->minVal >= SENSITIVITY) {
+      self->maxVal = newVal;
+      self->pressed = true;
+      self->pressChanged = true;
+    }
   }
+  log(LOG_K, "newVal k%d %d->%d m%d M%d p%d",
+      self->swId, self->val, newVal, self->minVal, self->maxVal, self->pressed);
 }
 
 static int constrain(int val, int minimum, int maximum)
@@ -1291,24 +1299,21 @@ static int constrain(int val, int minimum, int maximum)
   return val;
 }
 
-void key_calculateVal(Key *self)
+void key_setNewRaw(Key *self, uint16_t newRaw)
 {
-  key__filterRawValues(self);
+  self->rawValue = newRaw;
+  key__filterRawValue(self);
   if (self->swId == -1) return;
   int minRaw = self->minRaw_S >> 13;
   int maxRaw = self->maxRaw_S >> 13;
   int rawRange = maxRaw - minRaw;
-  int newRaw = self->newRaw;
   if (rawRange < self->minRawRange) return;
-  int val_90 = constrain((newRaw - minRaw) * 100 / rawRange, 0, 90);
-  if (abs(val_90 - self->val * 10) > 6) {
-    key_setVal(self, (val_90 + 5) / 10);
+  int old_val_90 = self->val * 10;
+  int new_val_90 = constrain((newRaw - minRaw) * 100 / rawRange, 0, 90);
+  if (abs(new_val_90 - old_val_90) > 6) {
+    int8_t newVal = (new_val_90 + 5) / 10;
+    key_setVal(self, newVal);
   }
-}
-
-void key_setNewRaw(Key *self, uint16_t newRaw)
-{
-  self->newRaw = newRaw;
 }
 
 
@@ -2149,13 +2154,17 @@ void localReader_readKeys(LocalReader *self)
       keyId++;
     }
     gpio_put(pin, 0);
-    sleep_us(80);
-  }
-  for (keyId=0; keyId < N_HWKEYS; keyId++) {
-    key_calculateVal(&self->keys[keyId]);
+    sleep_us(50);
   }
 }
 
+void localReader_processKeys(LocalReader *self)
+{
+  for (uint8_t keyId=0; keyId < N_HWKEYS; keyId++) {
+    Key *key = &self->keys[keyId];
+    key_processChanges(key);
+  }
+}
 
 // RemoteReader  {{{1
 typedef struct {
@@ -2178,6 +2187,13 @@ void remoteReader_readKeys(RemoteReader *self)
   }
 }
 
+void remoteReader_processKeys(RemoteReader *self)
+{
+  for (uint8_t keyId = 0; keyId < N_HWKEYS; keyId++) {
+    Key *key = &self->keys[keyId];
+    key_processChanges(key);
+  }
+}
 
 // main  {{{1
 void log_keys(Key *keys)
@@ -2204,7 +2220,7 @@ void log_keys(Key *keys)
       }
       printf("\n");
       for (int i = 0; i < N_HWKEYS; i++) {
-        printf("%5u", keys[i].newRaw);
+        printf("%5u", keys[i].rawValue);
       }
       printf("\n");
       fflush(stdout);
@@ -2263,8 +2279,10 @@ int main()
 
   while (true) {
     localReader_readKeys(&localReader);
+    remoteReader_readKeys(&remoteReader);
+    remoteReader_processKeys(&remoteReader);
+    localReader_processKeys(&localReader);
     if (mySide == usbSide) {
-      remoteReader_readKeys(&remoteReader);
       controller_task(&controller);
       usb_task(&usb);
     }
