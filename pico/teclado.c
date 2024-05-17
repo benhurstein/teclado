@@ -1,5 +1,5 @@
 // vim: foldmethod=marker
-// includes  {{{1
+// includes {{{1
 #include <stdio.h>
 #include <stdlib.h>
 #include <stdbool.h>
@@ -42,7 +42,7 @@ int8_t rightHwIdToSwId[N_HWKEYS] = {
   25, 20, 35, 29, 24, 19, 33, 28, 23, 18,
 };
 
-// types + globals  {{{1
+// types + globals {{{1
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
 keyboardSide mySide = noSide;
 keyboardSide otherSide = noSide;
@@ -126,7 +126,7 @@ typedef enum {
   but_forward  = 0b10000,
 } button_t;
 
-// ascii to mod-key  {{{1
+// ascii to mod-key {{{1
 typedef struct {
   modifier_t mod;
   keycode_t key;
@@ -173,7 +173,7 @@ const mod_key ascii_to_mod_key[] = {
 // for a codepoint in unicode -- 0 to 0x10FFFF
 typedef uint32_t unicode;
 
-// interfaces  {{{1
+// interfaces {{{1
 typedef struct usb USB;
 typedef struct controller Controller;
 typedef struct key Key;
@@ -235,7 +235,7 @@ Action action_tapAction(Action *self);
 enum holdType action_holdType(Action *self);
 
 
-// log  {{{1
+// log {{{1
 
 #define LOG_E 0b00000001
 #define LOG_I 0b00000010
@@ -263,7 +263,7 @@ void log_set_level(uint8_t new_level)
     }
 
 
-// Action  {{{1
+// Action {{{1
 // all things that can happen when a key is pressed or released
 typedef enum {
   no_action,
@@ -639,7 +639,7 @@ Action action_holdAction(Action *self)
 }
 
 
-// layers  {{{1
+// layers {{{1
 Action layer[][N_KEYS] = {
   [COLEMAK] = {
     KEY(K_Q       ), KEY(K_W       ), KEY(K_F       ), KEY(K_P       ), KEY(K_B       ),
@@ -741,7 +741,7 @@ bool layer_hasMouseMovementAction(layer_id_t layer_num)
   return false;
 }
 
-// WS2812 rgb led  {{{1
+// WS2812 rgb led {{{1
 
 #define WS2812_PIN 16
 #define IS_RGBW true
@@ -765,7 +765,7 @@ void led_init()
   led_set_rgb(0, 0, 0);
 }
 
-// Keycodeq  {{{1
+// Keycodeq {{{1
 
 #define KCQ_N 200
 typedef struct {
@@ -859,7 +859,7 @@ modifier_t keycodeq_removeModifier(Keycodeq *self)
 }
 
 
-// USB  {{{1
+// USB {{{1
 // interfaces with tinyUSB
 
 struct usb {
@@ -1071,7 +1071,7 @@ void usb_task(USB *self)
 }
 
 
-// UART  {{{1
+// UART {{{1
 void uart_send_key_val(uint8_t keyId, uint8_t val)
 {
   uint8_t b0 = val + 0xA0;
@@ -1123,7 +1123,7 @@ bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
 }
 
 
-// Key  {{{1
+// Key {{{1
 // stores info about a key
 
 struct key {
@@ -1317,7 +1317,7 @@ void key_setNewRaw(Key *self, uint16_t newRaw)
 }
 
 
-// KeyList  {{{1
+// KeyList {{{1
 typedef struct key_list_node KeyListNode;
 typedef struct key_list KeyList;
 
@@ -1433,7 +1433,7 @@ bool keyList_containsKey(KeyList *self, Key *key)
   return false;
 }
 
-// auxiliary functions for unicode  {{{1
+// auxiliary functions for unicode {{{1
 //   very basic support for á->Á and finding a codepoint in a utf8 str
 unicode unicode_to_upper(unicode lower)
 {
@@ -1488,7 +1488,7 @@ uint32_t unicode_from_utf8(char *p)
 
 
 
-// Controller  {{{1
+// Controller {{{1
 // controls the processing of keypresses
 
 struct controller {
@@ -1550,7 +1550,7 @@ void controller_init(Controller *self, USB *usb)
   self->capsLocked = false;
 }
 
-// auxiliary functions for wordLock  {{{2
+// auxiliary functions for wordLock {{{2
 bool uni_in_word(unicode uni)
 {
   if (uni == '_') return true;
@@ -2046,7 +2046,7 @@ void controller_task(Controller *self)
   }
 }
 
-// LocalReader  {{{1
+// LocalReader {{{1
 // reads the keys physically connected to local microcontroller
 typedef struct {
   uint8_t sel_pin[N_SEL_PINS];
@@ -2166,7 +2166,7 @@ void localReader_processKeys(LocalReader *self)
   }
 }
 
-// RemoteReader  {{{1
+// RemoteReader {{{1
 typedef struct {
   Key keys[N_HWKEYS];
 } RemoteReader;
@@ -2195,7 +2195,7 @@ void remoteReader_processKeys(RemoteReader *self)
   }
 }
 
-// main  {{{1
+// main {{{1
 void log_keys(Key *keys)
 {
   static uint32_t t0 = 0;
@@ -2292,7 +2292,7 @@ int main()
   return 0;
 }
 
-// USB callbacks  {{{1
+// USB callbacks {{{1
 #if 0
 //--------------------------------------------------------------------+
 // Device callbacks
