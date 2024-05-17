@@ -1076,48 +1076,47 @@ void usb_task(USB *self)
 // UART {{{1
 void uart_send_key_val(uint8_t keyId, uint8_t val)
 {
-  uint8_t b0 = val + 0xA0;
-  uint8_t b1 = keyId + 0x50;
-  uint8_t b2 = b0 ^ b1;
-  uart_putc_raw(UART_ID, 0);
+  uint8_t b0 = val + '0';
+  uint8_t t = b0 * 7 + keyId;
+  uint8_t b1 = ((t >> 3) ^ t) << 5 | keyId | 0x80;
   uart_putc_raw(UART_ID, b0);
   uart_putc_raw(UART_ID, b1);
-  uart_putc_raw(UART_ID, b2);
 }
 
 bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
 {
-  static uint8_t buffer[4];
+  static uint8_t buffer[2];
   static uint8_t count;
   static int errct, recct;
   while (true) {
     if (!uart_is_readable(UART_ID)) break;
     uint8_t c = uart_getc(UART_ID);
-    if (count == 0 && c != 0) {
+    if (count == 0 && (c < '0' || c > '9')) {
       log(LOG_C, "Err comm0.%02x", c);
       continue;
     }
     buffer[count++] = c;
-    if (count == 4) {
+    if (count == 2) {
       recct++;
       count = 0;
-      uint8_t b0 = buffer[1];
-      uint8_t b1 = buffer[2];
-      uint8_t b2 = buffer[3];
-      if (b2 != (b0 ^ b1)) {
+      uint8_t b0 = buffer[0];
+      uint8_t b1 = buffer[1];
+      uint8_t keyId = b1 & 0x1F;
+      uint8_t val = b0 - '0';
+      uint8_t t = b0 * 7 + keyId;
+      uint8_t bb1 = ((t >> 3) ^ t) << 5 | keyId | 0x80;
+      if (b1 != bb1) {
         errct++;
-        log(LOG_C, "Err comm1: [%02x %02x %02x] %d/%d", b0, b1, b2, errct, recct);
+        log(LOG_C, "Err comm1: [%02x %02x] %d/%d", b0, b1, errct, recct);
         continue;
       }
-      b0 -= 0xA0;
-      b1 -= 0x50;
-      if (b0 > 9 || b1 > 19) {
+      if (val > 9 || keyId > 19) {
         errct++;
-        log(LOG_C, "Err comm2: [%02x %02x %02x] %d/%d", b0, b1, b2, errct, recct);
+        log(LOG_C, "Err comm2: [%02x %02x] %d/%d", b0, b1, errct, recct);
         continue;
       }
-      *keyIdp = b1;
-      *valp = b0;
+      *keyIdp = keyId;
+      *valp = val;
       return true;
     }
   }
