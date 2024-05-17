@@ -47,6 +47,7 @@ typedef enum { noSide, leftSide, rightSide } keyboardSide;
 keyboardSide mySide = noSide;
 keyboardSide otherSide = noSide;
 keyboardSide usbSide = noSide;
+bool usbReady;
 
 typedef enum {
   COLEMAK,
@@ -903,7 +904,7 @@ void usb_testConnection(USB *self)
 {
   tud_task();
   if (usbSide != noSide) return;
-  if (tud_connected()) {
+  if (tud_ready()) {
     usbSide = mySide;
     uart_send_usb_side();
   } else if (uart_receive_usb_side()) {
@@ -1050,7 +1051,8 @@ void usb__sendModifierReleases(USB *self)
 void usb_task(USB *self)
 {
   tud_task();
-  //hid_task();
+  usbReady = tud_ready();
+  if (usbSide != mySide) return;
   if (!tud_hid_ready()) return;
   switch (keycodeq_head(&self->keycodeq)) {
     case none:
@@ -2282,10 +2284,8 @@ int main()
     remoteReader_readKeys(&remoteReader);
     remoteReader_processKeys(&remoteReader);
     localReader_processKeys(&localReader);
-    if (mySide == usbSide) {
-      controller_task(&controller);
-      usb_task(&usb);
-    }
+    controller_task(&controller);
+    usb_task(&usb);
 
     log_keys(localReader_keys(&localReader));
   }
