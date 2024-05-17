@@ -954,7 +954,7 @@ void usb_releaseKeycode(USB *self, keycode_t keycode)
   }
 }
 
-void usb_sendReport(USB *self)
+void usb_sendKeyboardReport(USB *self)
 {
   if (mySide == usbSide) {
     log(LOG_R, "send report %02x %02x.%02x.%02x.%02x.%02x.%02x",
@@ -1020,14 +1020,14 @@ void usb__sendKeycodePresses(USB *self)
   while (keycodeq_head(&self->keycodeq) == keycodePress) {
     usb__insertKeycode(self, keycodeq_removeKeycode(&self->keycodeq));
   }
-  usb_sendReport(self);
+  usb_sendKeyboardReport(self);
 }
 void usb__sendModifierPresses(USB *self)
 {
   while (keycodeq_head(&self->keycodeq) == modifierPress) {
     self->sent_modifiers |= keycodeq_removeModifier(&self->keycodeq);
   }
-  usb_sendReport(self);
+  usb_sendKeyboardReport(self);
 }
 void usb__sendKeycodeReleases(USB *self)
 {
@@ -1035,7 +1035,7 @@ void usb__sendKeycodeReleases(USB *self)
     usb__removeKeycode(self, keycodeq_removeKeycode(&self->keycodeq));
     break;
   }
-  usb_sendReport(self);
+  usb_sendKeyboardReport(self);
 }
 void usb__sendModifierReleases(USB *self)
 {
@@ -1044,7 +1044,7 @@ void usb__sendModifierReleases(USB *self)
     self->sent_modifiers &= ~keycodeq_removeModifier(&self->keycodeq);
     break;
   }
-  usb_sendReport(self);
+  usb_sendKeyboardReport(self);
 }
 
 void usb_task(USB *self)
