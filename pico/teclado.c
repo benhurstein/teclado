@@ -2211,7 +2211,6 @@ void remoteReader_readKeys(RemoteReader *self)
   uint8_t keyId;
   while (uart_receive_key_val(&keyId, &val)) {
     Key *key = &self->keys[keyId];
-    log(LOG_C, "rec %d %d", keyId, val);
     key_setVal(key, val);
   }
 }
