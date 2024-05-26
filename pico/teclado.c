@@ -747,6 +747,8 @@ bool layer_hasMouseMovementAction(layer_id_t layer_num)
 #define WS2812_PIN 16
 #define IS_RGBW true
 
+bool led_capsLock, led_wordLock, led_usbReady;
+
 static inline void led_set_rgb(uint8_t r, uint8_t g, uint8_t b)
 {
   uint32_t pixel_grbw =
@@ -756,6 +758,34 @@ static inline void led_set_rgb(uint8_t r, uint8_t g, uint8_t b)
   pio_sm_put_blocking(pio0, 0, pixel_grbw);
 }
 
+void led_updateColor()
+{
+  uint8_t r = 0, g = 0, b = 0;
+  if (usbSide == noSide) {
+    r = 50;
+  } else if (usbSide == mySide) {
+    if (led_capsLock) {
+      b = 10;
+    } else if (led_wordLock) {
+      b = 1;
+    } else {
+      g = 1;
+    }
+  }
+  led_set_rgb(r, g, b);
+}
+
+void led_setCapsLock(bool val)
+{
+  led_capsLock = val;
+  led_updateColor();
+}
+
+void led_setWordLock(bool val)
+{
+  led_wordLock = val;
+  led_updateColor();
+}
 void led_init()
 {
   PIO pio = pio0;
@@ -1580,20 +1610,16 @@ bool keycode_in_word_invert_shift(keycode_t keycode)
 }
 // }}}
 
-static void controller__setLed(Controller *self)
-{
-  led_set_rgb(0, self->capsLocked ? 15 : 0, self->wordLocked ? 15 : 0);
-}
-void Controller_set_capslock(bool newVal)
+void Controller_setCapsLock(bool newVal)
 {
   controller_singleton->capsLocked = newVal;
-  controller__setLed(controller_singleton);
+  led_setCapsLock(newVal);
 }
 
-static void controller__setWordLocked(Controller *self, bool newVal)
+static void controller__setWordLock(Controller *self, bool newVal)
 {
   self->wordLocked = newVal;
-  controller__setLed(self);
+  led_setWordLock(newVal);
 }
 
 static void controller__setModifiers(Controller *self, modifier_t new_modifiers)
@@ -1620,7 +1646,7 @@ static bool controller__isShifted(Controller *self)
 static void controller__sendPressKeycode(Controller *self, keycode_t keycode)
 {
   if (self->wordLocked && !keycode_in_word(keycode, controller__isShifted(self))) {
-    controller__setWordLocked(self, false);
+    controller__setWordLock(self, false);
   }
   if (self->wordLocked && keycode_in_word_invert_shift(keycode)) {
     usb_setModifiers(self->usb, self->modifiers ^ SHFT);
@@ -1905,7 +1931,7 @@ static void controller__sendUtf8Str(Controller *self, char s[])
   while (true) {
     unicode uni = unicode_from_utf8(s);
     if (uni == 0) break;
-    if (self->wordLocked && !uni_in_word(uni)) controller__setWordLocked(self, false);
+    if (self->wordLocked && !uni_in_word(uni)) controller__setWordLock(self, false);
     if (shifted ^ capsLocked ^ self->wordLocked) uni = unicode_to_upper(uni);
     controller__sendUsbUnicodeChar(self, uni);
     s += utf8_nbytes(s);
@@ -1919,7 +1945,7 @@ static void controller__sendUtf8Str(Controller *self, char s[])
 
 static uint8_t controller__sendPressAsciiChar(Controller *self, uint8_t ch)
 {
-  if (self->wordLocked && !uni_in_word(ch)) controller__setWordLocked(self, false);
+  if (self->wordLocked && !uni_in_word(ch)) controller__setWordLock(self, false);
   if (self->wordLocked) ch = unicode_to_upper(ch);
   controller__sendUsbPressAsciiChar(self, ch);
   usb_setModifiers(self->usb, self->modifiers);
@@ -2020,7 +2046,7 @@ static void controller__timedMoveMouse(Controller *self)
 void controller_doCommand(Controller *self, int command)
 {
   if (command == WORDLOCK) {
-    controller__setWordLocked(self, !self->wordLocked);
+    controller__setWordLock(self, !self->wordLocked);
     return;
   } else if (command == RESET) {
     reset_usb_boot(0, 0);
@@ -2505,12 +2531,12 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
       {
         // Capslock On: disable blink, turn led on
         printf("capslock on\n");
-        Controller_set_capslock(true);
+        Controller_setCapsLock(true);
       }else
       {
         // Caplocks Off: back to normal blink
         printf("capslock off\n");
-        Controller_set_capslock(false);
+        Controller_setCapsLock(false);
       }
     }
   }
