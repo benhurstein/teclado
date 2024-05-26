@@ -47,6 +47,7 @@ typedef enum { noSide, leftSide, rightSide } keyboardSide;
 keyboardSide mySide = noSide;
 keyboardSide otherSide = noSide;
 keyboardSide usbSide = noSide;
+bool toggleUsbSide;
 bool usbReady;
 
 typedef enum {
@@ -188,7 +189,6 @@ void usb_releaseKeycode(USB *self, keycode_t keycode);
 void usb_pressMouseButton(USB *self, button_t button);
 void usb_releaseMouseButton(USB *self, button_t button);
 void usb_moveMouse(USB *self, int8_t v, int8_t h, int8_t wv, int8_t wh);
-void usb_testConnection(USB *self);
 
 void controller_init(Controller *self, USB *usb);
 void controller_task(Controller *self);
@@ -247,7 +247,7 @@ enum holdType action_holdType(Action *self);
 #define LOG_K 0b01000000
 #define LOG_L 0b10000000
 
-uint8_t log_level = LOG_R | LOG_C;
+uint8_t log_level = LOG_L | LOG_R | LOG_C;
 
 void log_set_level(uint8_t new_level)
 {
@@ -374,7 +374,7 @@ typedef struct {
   button_t button;
 } mouse_button_action_t;
 typedef struct {
-  enum { RESET, WORDLOCK } command;
+  enum { RESET, WORDLOCK, USB_SIDE } command;
 } command_action_t;
 
 struct action {
@@ -683,7 +683,7 @@ Action layer[][N_KEYS] = {
     BUT(but_right ), BUT(but_left  ), BUT(but_middle),
   },
   [NAV] = {
-    NO_ACTION,       NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
+    COM(USB_SIDE  ), NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
     MOD(GUI       ), MOD(ALT       ), MOD(CTRL      ), MOD(SHFT      ), NO_ACTION,
     NO_ACTION,       MOD(RALT      ), LCK(SYM       ), LCK(NAV       ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
@@ -786,6 +786,12 @@ void led_setWordLock(bool val)
   led_wordLock = val;
   led_updateColor();
 }
+
+void setUsbSide(keyboardSide side)
+{
+  usbSide = side;
+}
+
 void led_init()
 {
   PIO pio = pio0;
@@ -915,31 +921,6 @@ void usb_init(USB *self)
   self->buttons = 0;
 
   tusb_init();
-}
-
-void uart_send_usb_side()
-{
-  uart_putc_raw(UART_ID, 'M');
-}
-
-bool uart_receive_usb_side()
-{
-  if (!uart_is_readable(UART_ID)) return false;
-  uint8_t c = uart_getc(UART_ID);
-  if (c == 'M') return true;
-  return false;
-}
-
-void usb_testConnection(USB *self)
-{
-  tud_task();
-  if (usbSide != noSide) return;
-  if (tud_ready()) {
-    usbSide = mySide;
-    uart_send_usb_side();
-  } else if (uart_receive_usb_side()) {
-    usbSide = otherSide;
-  }
 }
 
 void usb_pressModifier(USB *self, modifier_t modifier)
@@ -1107,19 +1088,24 @@ void usb_task(USB *self)
 void uart_send_key_val(uint8_t keyId, uint8_t val)
 {
   uint8_t b0 = val + '0';
-  uint8_t t = b0 * 7 + keyId;
+  uint8_t t = b0 * 3 + keyId;
   uint8_t b1 = ((t >> 3) ^ t) << 5 | keyId | 0x80;
   uart_putc_raw(UART_ID, b0);
   uart_putc_raw(UART_ID, b1);
 }
 
+void uart_send_key_end()
+{
+  uart_send_key_val(20, 1);
+}
+
 bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
 {
   static uint8_t buffer[2];
-  static uint8_t count;
-  static int errct, recct;
+  static uint8_t count = 0;
+  static int errct = 0, recct = 0;
   while (true) {
-    if (!uart_is_readable(UART_ID)) break;
+    //if (!uart_is_readable(UART_ID)) break;
     uint8_t c = uart_getc(UART_ID);
     if (count == 0 && (c < '0' || c > '9')) {
       log(LOG_C, "Err comm0.%02x", c);
@@ -1133,12 +1119,15 @@ bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
       uint8_t b1 = buffer[1];
       uint8_t keyId = b1 & 0x1F;
       uint8_t val = b0 - '0';
-      uint8_t t = b0 * 7 + keyId;
+      uint8_t t = b0 * 3 + keyId;
       uint8_t bb1 = ((t >> 3) ^ t) << 5 | keyId | 0x80;
       if (b1 != bb1) {
         errct++;
         log(LOG_C, "Err comm1: [%02x %02x] %d/%d", b0, b1, errct, recct);
         continue;
+      }
+      if (keyId == 20) {
+        return false;
       }
       if (val > 9 || keyId > 19) {
         errct++;
@@ -1264,21 +1253,22 @@ static void key__filterRawValue(Key *self)
 void key_processChanges(Key *self)
 {
   if (self->swId == -1) return;
-  if (self->valChanged) {
-    self->valChanged = false;
-    if (key_side(self) == mySide && mySide != usbSide) {
-      uart_send_key_val(self->hwId, self->val);
-    }
-  }
   if (self->pressChanged) {
     self->pressChanged = false;
-    if (mySide == usbSide) {
-      if (self->pressed) {
-        controller_keyPressed(self->controller, self);
-      } else {
-        controller_keyReleased(self->controller, self);
-      }
+    if (self->pressed) {
+      controller_keyPressed(self->controller, self);
+    } else {
+      controller_keyReleased(self->controller, self);
     }
+  }
+}
+
+void key_send(Key *self)
+{
+  if (self->swId == -1) return;
+  if (self->valChanged) {
+    self->valChanged = false;
+    uart_send_key_val(self->hwId, self->val);
   }
 }
 
@@ -2051,6 +2041,9 @@ void controller_doCommand(Controller *self, int command)
   } else if (command == RESET) {
     reset_usb_boot(0, 0);
     return;
+  } else if (command == USB_SIDE) {
+    toggleUsbSide = true;
+    return;
   }
   printf("%s(%d) not implemented\n", __func__, command);
   printf("Layers: current=%d base=%d\n", self->currentLayer, self->baseLayer);
@@ -2193,6 +2186,15 @@ void localReader_processKeys(LocalReader *self)
   }
 }
 
+void localReader_sendKeys(LocalReader *self)
+{
+  for (uint8_t keyId=0; keyId < N_HWKEYS; keyId++) {
+    Key *key = &self->keys[keyId];
+    key_send(key);
+  }
+  uart_send_key_end();
+}
+
 // RemoteReader {{{1
 typedef struct {
   Key keys[N_HWKEYS];
@@ -2232,7 +2234,8 @@ void log_keys(Key *keys)
     ct++;
     if (ct == 1000) {
       uint32_t t1 = time_us_32();
-      printf("%s(%d) ", mySide == leftSide ? "LEFT" : "RIGHT", mySide == usbSide);
+      printf("%s(%c) ", mySide == leftSide ? "LEFT" : "RIGHT", usbSide == leftSide ? 'L' : usbSide == rightSide ? 'R' : 'N');
+      printf("L%d ", controller_singleton->currentLayer);
       printf("%uHz\n", ct * 1000000u / (t1 - t0));
       for (int i = 0; i < N_HWKEYS; i++) {
         printf("%5u", keys[i].minRaw_S >> 13);
@@ -2275,10 +2278,73 @@ void hardware_init()
   stdio_set_translate_crlf(&stdio_usb, false);
 
   uart_init(UART_ID, BAUD_RATE);
+  uart_set_fifo_enabled(UART_ID, true);
   gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
   gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
 
   led_init();
+}
+
+void synchronizeAndDecideUsbSide()
+{
+  // normal case: usbSide sends 'M', other side receives it
+  // other cases:
+  //   usbSide lost USB connection, sends 'm'; other side:
+  //     has USB connection, becomes new usbSide, sends 'M'
+  //     has no connection, usbSide becomes noSide, sends 'm'
+  //   usbSide is noSide, left side decides, sends 'M' or 'm'
+  //     right side receives, if 'M', left is new usbSide; if 'm',
+  //     if right side has usb connection, it becomes new usbSide, sends 'M'
+  //     else, sends 'm' and usbSide remains noSide
+  if (usbSide == mySide) {
+    if (usbReady && !toggleUsbSide) {
+      uart_putc_raw(UART_ID, 'M');
+    } else {
+      setUsbSide(noSide);
+      uart_putc_raw(UART_ID, 'm');
+      uint8_t c = uart_getc(UART_ID);
+      if (c == 'M') setUsbSide(otherSide);
+    }
+  } else if (usbSide == otherSide) {
+    uint8_t c = uart_getc(UART_ID);
+    if (c == 'm') {
+      if (usbReady) {
+        setUsbSide(mySide);
+        uart_putc_raw(UART_ID, 'M');
+      } else {
+        setUsbSide(noSide);
+        uart_putc_raw(UART_ID, 'm');
+      }
+    }
+  } else {
+    if (mySide == leftSide) {
+      if (usbReady) {
+        setUsbSide(mySide);
+        uart_putc_raw(UART_ID, 'M');
+      } else {
+        uart_putc_raw(UART_ID, 'm');
+        uint8_t c = uart_getc(UART_ID);
+        if (c == 'M') setUsbSide(otherSide);
+      }
+    } else {
+      uint8_t c = uart_getc(UART_ID);
+      if (c == 'm') {
+        if (usbReady) {
+          setUsbSide(mySide);
+          uart_putc_raw(UART_ID, 'M');
+        } else {
+          setUsbSide(noSide);
+          uart_putc_raw(UART_ID, 'm');
+        }
+      } else {
+        setUsbSide(otherSide);
+      }
+    }
+  }
+  toggleUsbSide = false;
+
+  led_updateColor();
+
 }
 
 int main()
@@ -2298,19 +2364,22 @@ int main()
   otherSide = (mySide == leftSide) ? rightSide : leftSide;
   remoteReader_init(&remoteReader, &controller, otherSide);
 
-  uint32_t t0 = time_us_32();
-  while (usbSide == noSide && time_us_32() - t0 < 10000000) {
-    usb_testConnection(&usb);
-  }
-  if (usbSide == noSide) fatal("Did not detect USB connection");
+  setUsbSide(noSide);
 
   while (true) {
-    localReader_readKeys(&localReader);
-    remoteReader_readKeys(&remoteReader);
-    remoteReader_processKeys(&remoteReader);
-    localReader_processKeys(&localReader);
-    controller_task(&controller);
+    if (usbSide == mySide) {
+      localReader_readKeys(&localReader);
+      remoteReader_readKeys(&remoteReader);
+      remoteReader_processKeys(&remoteReader);
+      localReader_processKeys(&localReader);
+      controller_task(&controller);
+    }
+    if (usbSide == otherSide) {
+      localReader_readKeys(&localReader);
+      localReader_sendKeys(&localReader);
+    }
     usb_task(&usb);
+    synchronizeAndDecideUsbSide();
 
     log_keys(localReader_keys(&localReader));
   }
