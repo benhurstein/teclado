@@ -42,6 +42,8 @@ int8_t rightHwIdToSwId[N_HWKEYS] = {
   25, 20, 35, 29, 24, 19, 33, 28, 23, 18,
 };
 
+#define LOCK_DELAY_MS 200
+
 // types + globals {{{1
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
 keyboardSide mySide = noSide;
@@ -1531,6 +1533,8 @@ struct controller {
   modifier_t modifiers;
   bool wordLocked;
   bool capsLocked;
+  layer_id_t changeToLayer;
+  uint32_t changeLayerTimestamp;
 } *controller_singleton;
 
 static void controller__setMoveMouseTimeout(Controller *self, int interval_ms)
@@ -1669,15 +1673,31 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
     self->lockLayer = NO_LAYER;
     controller__setCurrentLayer(self, self->baseLayer);
   } else {
-    self->lockLayer = layer;
-    controller__setCurrentLayer(self, layer);
+    uint32_t now = board_millis();
+    if (self->changeLayerTimestamp != 0
+        && self->changeToLayer == layer
+        && now - self->changeLayerTimestamp <= LOCK_DELAY_MS) {
+      self->lockLayer = layer;
+      controller__setCurrentLayer(self, layer);
+    } else {
+      self->changeLayerTimestamp = now;
+      self->changeToLayer = layer;
+    }
   }
 }
 
 void controller_changeBaseLayer(Controller *self, layer_id_t layer)
 {
   log(LOG_T, "%s(%d)", __func__, layer);
-  self->baseLayer = layer;
+  uint32_t now = board_millis();
+  if (self->changeLayerTimestamp != 0
+    && self->changeToLayer == layer
+    && now - self->changeLayerTimestamp <= LOCK_DELAY_MS) {
+    self->baseLayer = layer;
+  } else {
+    self->changeLayerTimestamp = now;
+    self->changeToLayer = layer;
+  }
 }
 
 layer_id_t controller_baseLayer(Controller *self)
