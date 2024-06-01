@@ -1670,18 +1670,21 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
 {
   log(LOG_T, "%s(%d)", __func__, layer);
   if (self->lockLayer == layer) {
+    // unlock if already locked in same layer
     self->lockLayer = NO_LAYER;
     controller__setCurrentLayer(self, self->baseLayer);
   } else {
     uint32_t now = board_millis();
-    if (self->changeLayerTimestamp != 0
-        && self->changeToLayer == layer
-        && now - self->changeLayerTimestamp <= LOCK_DELAY_MS) {
-      self->lockLayer = layer;
-      controller__setCurrentLayer(self, layer);
-    } else {
+    if (self->changeLayerTimestamp == 0
+        || self->changeToLayer != layer
+        || now - self->changeLayerTimestamp > LOCK_DELAY_MS) {
+      // mark and wait for second tap
       self->changeLayerTimestamp = now;
       self->changeToLayer = layer;
+    } else {
+      // lock on second tap
+      self->lockLayer = layer;
+      controller__setCurrentLayer(self, layer);
     }
   }
 }
@@ -1690,13 +1693,15 @@ void controller_changeBaseLayer(Controller *self, layer_id_t layer)
 {
   log(LOG_T, "%s(%d)", __func__, layer);
   uint32_t now = board_millis();
-  if (self->changeLayerTimestamp != 0
-    && self->changeToLayer == layer
-    && now - self->changeLayerTimestamp <= LOCK_DELAY_MS) {
-    self->baseLayer = layer;
-  } else {
+  if (self->changeLayerTimestamp == 0
+    || self->changeToLayer != layer
+    || now - self->changeLayerTimestamp > LOCK_DELAY_MS) {
+    // mark and wait for second tap
     self->changeLayerTimestamp = now;
     self->changeToLayer = layer;
+  } else {
+    // change base layer on second tap
+    self->baseLayer = layer;
   }
 }
 
