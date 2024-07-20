@@ -19,39 +19,53 @@
 #define SENSITIVITY 6
 #define MOUSE_PERIOD 30
 
-#define UART_ID uart1
 #define BAUD_RATE 500000
-#define UART_TX_PIN 4
-#define UART_RX_PIN 5
 
 #define N_SEL_PINS 5
 #define N_ANA_PINS 4
-#define N_HWKEYS (N_SEL_PINS * N_ANA_PINS)
+#define N_HALL_HWKEYS (N_SEL_PINS * N_ANA_PINS)
+#define N_CONTACT_HWKEYS 32
 #define N_KEYS 36
 
 uint8_t left_sel_pins[N_SEL_PINS] = { 14, 15, 3, 1, 0 };
 uint8_t right_sel_pins[N_SEL_PINS] = { 0, 1, 3, 6, 7 };
 uint8_t ana_pins[N_ANA_PINS] = { 26, 27, 28, 29 };
 
-int8_t leftHwIdToSwId[N_HWKEYS] = {
+int8_t leftHallHwIdToSwId[N_HALL_HWKEYS] = {
   17, 14,  9,  4, 16, 13,  8,  3, 15, 12,
-  7,  2, -1, 11,  6,  1, -1, 10,  5,  0,
+   7,  2, -1, 11,  6,  1, -1, 10,  5,  0,
 };
-int8_t rightHwIdToSwId[N_HWKEYS] = {
+int8_t rightHallHwIdToSwId[N_HALL_HWKEYS] = {
   -1, 32, 27, 22, -1, 31, 26, 21, 34, 30,
   25, 20, 35, 29, 24, 19, 33, 28, 23, 18,
+};
+int8_t rightContactHwIdToSwId[N_CONTACT_HWKEYS] = {
+  -1, -1, 18, 20, 19, 25, 21, 26, 23, 24, 30, 29, 31, 28, 22, 27,
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 32, 35, 34, 33, -1, -1,
 };
 
 #define LOCK_DELAY_MS 200
 
-// types + globals {{{1
+// status {{{1
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
-keyboardSide mySide = noSide;
-keyboardSide otherSide = noSide;
-keyboardSide usbSide = noSide;
-bool toggleUsbSide;
-bool usbReady;
+typedef enum { hall, contact } keyboardType;
+struct {
+  keyboardSide mySide;
+  bool usbReady;
+  bool usbActive;
+  bool toggleUsb;
+  keyboardSide otherSide;
+  bool otherSideUsbReady;
+  bool otherSideUsbActive;
+  bool otherSideToggleUsb;
+  uint32_t now;
+  bool commOK;
+  uint32_t lastReceiveTimestamp;
+  uint32_t lastSendTimestamp;
+  uint32_t lastActiveTimestamp;
+} status;
 
+// types {{{1
 typedef enum {
   COLEMAK,
   ACC,
@@ -214,8 +228,8 @@ void controller_keyPressed(Controller *self, Key *key);
 void controller_keyReleased(Controller *self, Key *key);
 
 
-Key *Key_keyWithId(uint8_t swId);
-void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId);
+Key *Key_keyWithId(uint8_t keyId);
+void key_init(Key *self, Controller *controller, uint8_t keyId);
 int8_t key_id(Key *self);
 keyboardSide key_side(Key *self);
 void key_setNewRaw(Key *self, uint16_t newRaw);
@@ -763,9 +777,9 @@ static inline void led_set_rgb(uint8_t r, uint8_t g, uint8_t b)
 void led_updateColor()
 {
   uint8_t r = 0, g = 0, b = 0;
-  if (usbSide == noSide) {
+  if (!status.usbActive && !status.otherSideUsbActive) {
     r = 50;
-  } else if (usbSide == mySide) {
+  } else if (status.usbActive) {
     if (led_capsLock) {
       b = 10;
     } else if (led_wordLock) {
@@ -791,7 +805,8 @@ void led_setWordLock(bool val)
 
 void setUsbSide(keyboardSide side)
 {
-  usbSide = side;
+  status.usbActive = (side == status.mySide);
+  status.otherSideUsbActive = (side == status.otherSide);
 }
 
 void led_init()
@@ -801,7 +816,7 @@ void led_init()
   uint offset = pio_add_program(pio, &ws2812_program);
 
   ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
-  led_set_rgb(0, 0, 0);
+  led_set_rgb(5, 5, 5);
 }
 
 // Keycodeq {{{1
@@ -970,7 +985,7 @@ void usb_releaseKeycode(USB *self, keycode_t keycode)
 
 void usb_sendKeyboardReport(USB *self)
 {
-  if (mySide == usbSide) {
+  if (status.usbActive) {
     log(LOG_R, "send report %02x %02x.%02x.%02x.%02x.%02x.%02x",
         self->sent_modifiers,
         self->keycodes[0], self->keycodes[1], self->keycodes[2],
@@ -982,7 +997,7 @@ void usb_sendKeyboardReport(USB *self)
 void usb_sendMouseReport(USB *self, uint8_t buttons, int8_t v, int8_t h, int8_t wv, int8_t wh)
 {
   // buttons, x, y, scroll, pan
-  if (mySide == usbSide) {
+  if (status.usbActive) {
     log(LOG_U, "usb mouse: B%x ^%d >%d %d %d", buttons, v, h, wv, wh);
     tud_hid_mouse_report(REPORT_ID_MOUSE, buttons, h, v, wv, wh);
   }
@@ -1064,8 +1079,10 @@ void usb__sendModifierReleases(USB *self)
 void usb_task(USB *self)
 {
   tud_task();
-  usbReady = tud_ready();
-  if (usbSide != mySide) return;
+  status.usbReady = tud_ready();
+  if (!status.usbActive) return;
+  if (keycodeq_head(&self->keycodeq) == none) return;
+  if (tud_suspended()) tud_remote_wakeup();
   if (!tud_hid_ready()) return;
   switch (keycodeq_head(&self->keycodeq)) {
     case none:
@@ -1086,54 +1103,83 @@ void usb_task(USB *self)
 }
 
 
-// UART {{{1
-void uart_send_key_val(uint8_t keyId, uint8_t val)
+// comm {{{1
+
+static uart_inst_t *comm_uart_id = NULL;
+static int comm_error_count = 0, comm_received_message_count = 0;
+
+#define UART0_TX_PIN 0
+#define UART0_RX_PIN 1
+#define UART1_TX_PIN 4
+#define UART1_RX_PIN 5
+
+void comm_init(int id)
 {
-  uint8_t b0 = val + '0';
-  uint8_t t = b0 * 3 + keyId;
-  uint8_t b1 = ((t >> 3) ^ t) << 5 | keyId | 0x80;
-  uart_putc_raw(UART_ID, b0);
-  uart_putc_raw(UART_ID, b1);
+  uint tx_pin, rx_pin;
+  if (id == 0) {
+    comm_uart_id = uart0;
+    tx_pin = UART0_TX_PIN;
+    rx_pin = UART0_RX_PIN;
+  } else {
+    comm_uart_id = uart1;
+    tx_pin = UART1_TX_PIN;
+    rx_pin = UART1_RX_PIN;
+  }
+  uart_init(comm_uart_id, BAUD_RATE);
+  uart_set_fifo_enabled(comm_uart_id, true);
+  gpio_set_function(tx_pin, GPIO_FUNC_UART);
+  gpio_set_function(rx_pin, GPIO_FUNC_UART);
 }
 
-void uart_send_key_end()
+uint8_t comm_getc()
 {
-  uart_send_key_val(20, 1);
+  return uart_getc(comm_uart_id);
 }
 
-bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
+void comm_putc(uint8_t c)
 {
-  static uint8_t buffer[2];
+  uart_putc_raw(comm_uart_id, c);
+}
+
+static void comm__encode_key_val(uint8_t keyId, uint8_t val, uint8_t buf[2])
+{
+  uint8_t x = val * 3 + keyId;
+  uint8_t y = (x >> 3) ^ x;
+  buf[0] = ((y & 0b0111) << 4) | val;
+  buf[1] = ((y & 0b1000) << 3) | 0b10000000 | keyId;
+}
+
+void comm_sendMessage(uint8_t keyId, uint8_t val)
+{
+  uint8_t buf[2];
+  comm__encode_key_val(keyId, val, buf);
+  comm_putc(buf[0]);
+  comm_putc(buf[1]);
+}
+
+bool comm_receiveMessage(uint8_t *keyIdp, uint8_t *valp)
+{
+  static uint8_t buf[2];
   static uint8_t count = 0;
-  static int errct = 0, recct = 0;
-  while (true) {
-    //if (!uart_is_readable(UART_ID)) break;
-    uint8_t c = uart_getc(UART_ID);
-    if (count == 0 && (c < '0' || c > '9')) {
-      log(LOG_C, "Err comm0.%02x", c);
+  while (uart_is_readable(comm_uart_id)) {
+    uint8_t c = comm_getc();
+    uint8_t keyId, val;
+    if (count == 0 && c > 127) {
+      comm_error_count++;
+      log(LOG_C, "Err comm0 sync: [%02hhx] %d/%d", c, comm_error_count, comm_received_message_count);
       continue;
     }
-    buffer[count++] = c;
+    buf[count++] = c;
     if (count == 2) {
-      recct++;
+      comm_received_message_count++;
       count = 0;
-      uint8_t b0 = buffer[0];
-      uint8_t b1 = buffer[1];
-      uint8_t keyId = b1 & 0x1F;
-      uint8_t val = b0 - '0';
-      uint8_t t = b0 * 3 + keyId;
-      uint8_t bb1 = ((t >> 3) ^ t) << 5 | keyId | 0x80;
-      if (b1 != bb1) {
-        errct++;
-        log(LOG_C, "Err comm1: [%02x %02x] %d/%d", b0, b1, errct, recct);
-        continue;
-      }
-      if (keyId == 20) {
-        return false;
-      }
-      if (val > 9 || keyId > 19) {
-        errct++;
-        log(LOG_C, "Err comm2: [%02x %02x] %d/%d", b0, b1, errct, recct);
+      val   = buf[0] & 0b10001111;
+      keyId = buf[1] & 0b00111111;
+      uint8_t b[2];
+      comm__encode_key_val(keyId, val, b);
+      if (b[0] != buf[0] || b[1] != buf[1]) {
+        comm_error_count++;
+        log(LOG_C, "Err comm1 checksum: [%02hhx %02hhx] %d/%d", buf[0], buf[1], comm_error_count, comm_received_message_count);
         continue;
       }
       *keyIdp = keyId;
@@ -1144,16 +1190,53 @@ bool uart_receive_key_val(uint8_t *keyIdp, uint8_t *valp)
   return false;
 }
 
+void comm_sendStatus()
+{
+  uint8_t val = 0;
+  if (status.mySide == rightSide) val |= 0b0001;
+  if (status.usbReady)            val |= 0b0010;
+  if (status.usbActive)           val |= 0b0100;
+  if (status.toggleUsb)           val |= 0b1000;
+  comm_sendMessage(62, val);
+}
+
+void comm_task()
+{
+  uint8_t msgVal;
+  uint8_t msgId;
+  while (comm_receiveMessage(&msgId, &msgVal)) {
+    status.commOK = true;
+    status.lastReceiveTimestamp = status.now;
+    Key *key = Key_keyWithId(msgId);
+    if (key != NULL) {
+      if (msgVal > 9) {
+        comm_error_count++;
+        log(LOG_C, "Err comm2 invalid value: [%02hhx %02hhx] %d/%d", msgId, msgVal, comm_error_count, comm_received_message_count);
+      } else {
+        key_setVal(key, msgVal);
+      }
+    } else if (msgId == 62) {
+      status.otherSide          = ((msgVal & 0b0001) == 0) ? leftSide : rightSide;
+      status.otherSideUsbReady  = ((msgVal & 0b0010) != 0);
+      status.otherSideUsbActive = ((msgVal & 0b0100) != 0);
+      status.otherSideToggleUsb = ((msgVal & 0b1000) != 0);
+    } else {
+      comm_error_count++;
+      log(LOG_C, "Err comm3 invalid id: [%02hhx %02hhx] %d/%d", msgId, msgVal, comm_error_count, comm_received_message_count);
+    }
+  }
+  if (status.commOK && (status.lastReceiveTimestamp - status.now) < 10000) status.commOK = false;;
+}
+
+
 
 // Key {{{1
 // stores info about a key
 
 struct key {
   Controller *controller;
-  // low level id, depending on wiring, can be repeated on other side
-  int8_t hwId;
-  // higher level id, O-17 for left (0=Q,1=W), 18-35 for right (18=Y,19=U)
-  int8_t swId;
+  // key id, O-17 for left (0=Q,1=W), 18-35 for right (18=Y,19=U)
+  int8_t keyId;
   // last value read from sensor
   uint16_t rawValue;
   uint16_t minRawRange;
@@ -1174,42 +1257,74 @@ struct key {
   bool pressChanged;
 };
 
-Key *keys[N_KEYS];
+Key keys[N_KEYS];
 
-Key *Key_keyWithId(uint8_t swId)
+static void key__sendIfChanged(Key *self);
+
+void Key_init(Controller *controller)
 {
-  return keys[swId];
+  for (uint8_t keyId = 0; keyId < N_KEYS; keyId++) {
+    key_init(&keys[keyId], controller, keyId);
+  }
+
+}
+
+Key *Key_keyWithId(uint8_t keyId)
+{
+  if (keyId > N_KEYS) return NULL;
+  return &keys[keyId];
+}
+
+void Key_processKeyChanges()
+{
+  for (uint8_t keyId = 0; keyId < N_KEYS; keyId++) {
+    key_processChanges(&keys[keyId]);
+  }
+}
+
+void Key_sendChangedKeys(keyboardSide side)
+{
+  uint8_t firstKeyId, lastKeyId;
+  if (side == leftSide) {
+    firstKeyId = 0;
+    lastKeyId = 17;
+  } else {
+    firstKeyId = 18;
+    lastKeyId = 35;
+  }
+  for (uint8_t keyId = firstKeyId; keyId <= lastKeyId; keyId++) {
+    Key *key = &keys[keyId];
+    key__sendIfChanged(key);
+  }
 }
 
 char *key_description(Key *self)
 {
   static char description[4];
-  sprintf(description, "k%d", self->swId);
+  sprintf(description, "k%d", self->keyId);
   return description;
 }
 
-void key_init(Key *self, Controller *controller, uint8_t hwId, uint8_t swId)
+void key_init(Key *self, Controller *controller, uint8_t keyId)
 {
   memset(self, 0, sizeof(*self));
   self->controller = controller;
-  self->hwId = hwId;
-  self->swId = swId;
+  self->keyId = keyId;
   self->filteredRaw_S = UINT32_MAX;
   self->val = 0;
   self->pressed = false;
   self->minVal = 0;
-  keys[swId] = self;
 }
 
 int8_t key_id(Key *self)
 {
-  return self->swId;
+  return self->keyId;
 }
 
 keyboardSide key_side(Key *self)
 {
-  if (self->swId >=  0 && self->swId <= 17) return leftSide;
-  if (self->swId >= 18 && self->swId <= 35) return rightSide;
+  if (self->keyId >=  0 && self->keyId <= 17) return leftSide;
+  if (self->keyId >= 18 && self->keyId <= 35) return rightSide;
   return noSide;
 }
 
@@ -1254,7 +1369,7 @@ static void key__filterRawValue(Key *self)
 
 void key_processChanges(Key *self)
 {
-  if (self->swId == -1) return;
+  if (self->keyId == -1) return;
   if (self->pressChanged) {
     self->pressChanged = false;
     if (self->pressed) {
@@ -1265,12 +1380,12 @@ void key_processChanges(Key *self)
   }
 }
 
-void key_send(Key *self)
+void key__sendIfChanged(Key *self)
 {
-  if (self->swId == -1) return;
+  if (self->keyId == -1) return;
   if (self->valChanged) {
     self->valChanged = false;
-    uart_send_key_val(self->hwId, self->val);
+    comm_sendMessage(self->keyId, self->val);
   }
 }
 
@@ -1291,7 +1406,7 @@ Action *key_releaseAction(Key *self)
 
 void key_setVal(Key *self, uint8_t newVal)
 {
-  if (self->swId == -1) return;
+  if (self->keyId == -1) return;
   if (newVal == self->val) return;
   self->val = newVal;
   self->valChanged = true;
@@ -1311,8 +1426,8 @@ void key_setVal(Key *self, uint8_t newVal)
       self->pressChanged = true;
     }
   }
-  log(LOG_K, "newVal k%d %d->%d m%d M%d p%d",
-      self->swId, self->val, newVal, self->minVal, self->maxVal, self->pressed);
+  //log(LOG_K, "newVal k%d %d->%d m%d M%d p%d",
+  //    self->keyId, self->val, newVal, self->minVal, self->maxVal, self->pressed);
 }
 
 static int constrain(int val, int minimum, int maximum)
@@ -1326,7 +1441,7 @@ void key_setNewRaw(Key *self, uint16_t newRaw)
 {
   self->rawValue = newRaw;
   key__filterRawValue(self);
-  if (self->swId == -1) return;
+  if (self->keyId == -1) return;
   int minRaw = self->minRaw_S >> 13;
   int maxRaw = self->maxRaw_S >> 13;
   int rawRange = maxRaw - minRaw;
@@ -1414,7 +1529,7 @@ void keyList_destroy(KeyList *self)
 
 void keyList_insertKey(KeyList *self, Key *key)
 {
-//  printf("before insert %p(%d): ", key, key->swId); keyList_print(self);
+//  printf("before insert %p(%d): ", key, key->keyId); keyList_print(self);
   KeyListNode *node = KeyListNode_create(key, NULL);
   assert(node != NULL); // BADABOOM!!!
   if (keyList_empty(self)) {
@@ -1450,7 +1565,7 @@ void keyList_removeKey(KeyList *self, Key *key)
 bool keyList_containsKey(KeyList *self, Key *key)
 {
   for (KeyListNode *node = self->first; node != NULL; node = node->next) {
-//    printf("testing %p(%d) and %p(%d)\n", key, key->swId, node->key, node->key->swId);
+//    printf("testing %p(%d) and %p(%d)\n", key, key->keyId, node->key, node->key->keyId);
     if (node->key == key) return true;
   }
   return false;
@@ -2067,7 +2182,7 @@ void controller_doCommand(Controller *self, int command)
     reset_usb_boot(0, 0);
     return;
   } else if (command == USB_SIDE) {
-    toggleUsbSide = true;
+    status.toggleUsb = true;
     return;
   }
   printf("%s(%d) not implemented\n", __func__, command);
@@ -2080,6 +2195,7 @@ void controller_doCommand(Controller *self, int command)
 
 void controller_task(Controller *self)
 {
+  Key_processKeyChanges();
   if (self->moveMouseTimeout != 0 && board_millis() >= self->moveMouseTimeout) {
     self->moveMouseTimeout = 0;
     controller__timedMoveMouse(self);
@@ -2094,35 +2210,34 @@ void controller_task(Controller *self)
 // LocalReader {{{1
 // reads the keys physically connected to local microcontroller
 typedef struct {
-  uint8_t sel_pin[N_SEL_PINS];
-  Key keys[N_HWKEYS];
+  uint8_t *sel_pins;
   keyboardSide side;
+  keyboardType kb_type;
+  int8_t hw_version;
+  int8_t *hwIdToKeyId;
 } LocalReader;
 
-void init_keys(Key keys[N_HWKEYS], keyboardSide side, Controller *controller)
-{
-  int8_t *hwIdToSwId = side == leftSide ? leftHwIdToSwId : rightHwIdToSwId;
-  for (int8_t hwId = 0; hwId < N_HWKEYS; hwId++) {
-    int8_t swId = hwIdToSwId[hwId];
-    key_init(&keys[hwId], controller, hwId, swId);
-    key_setMinRawRange(&keys[hwId], 50);
-  }
-}
-
-void localReader__initADC(LocalReader *self)
+void localReader__initHallGPIO(LocalReader *self)
 {
   adc_init();
   for (int i = 0; i < N_ANA_PINS; i++) {
     adc_gpio_init(ana_pins[i]);
   }
-}
-
-void localReader__initGPIO(LocalReader *self)
-{
   for (int i = 0; i < N_SEL_PINS; i++) {
-    uint pin = self->sel_pin[i];
+    uint pin = self->sel_pins[i];
     gpio_init(pin);
     gpio_set_dir(pin, GPIO_OUT);
+  }
+}
+
+void localReader__initContactGPIO(LocalReader *self)
+{
+  for (int pin = 0; pin < N_CONTACT_HWKEYS; pin++) {
+    if (self->hwIdToKeyId[pin] != -1) {
+      gpio_init(pin);
+      gpio_set_dir(pin, GPIO_IN);
+      gpio_pull_up(pin);
+    }
   }
 }
 
@@ -2138,10 +2253,28 @@ static uint16_t readPin(uint sel, uint ana)
   return raw;
 }
 
-static keyboardSide readKeyboardSide()
+int v1, v2;
+static uint8_t readKeyboardVersion()
 {
+  // hardware type 2 has choc keys and a resistor between pins 28 and 29
+  adc_init();
+  adc_gpio_init(29);
+  adc_select_input(3);
+  gpio_init(28);
+  gpio_set_dir(28, GPIO_OUT);
+  gpio_put(28, false);
+  sleep_us(5000);
+  v1 = adc_read();
+  gpio_put(28, true);
+  sleep_us(5000);
+  v2 = adc_read();
+  gpio_deinit(28);
+  if (abs(v1 - v2) > 500) return 2;
+  return 2;
+
+  // hardware type 0 and 1 has hall sensors
   // on the right keyboard half, pin 2 is connected to pin 1;
-  // on the left half, it is connected to pin 3
+  // on the left half, pin 2 is connected to pin 3
   gpio_init(2);
   gpio_set_dir(2, GPIO_IN);
   gpio_init(1);
@@ -2151,28 +2284,65 @@ static keyboardSide readKeyboardSide()
   gpio_put(1, 0);
   gpio_put(3, 1);
   sleep_us(10);
-  keyboardSide side = gpio_get(2) ? leftSide : rightSide;
+  keyboardSide side1 = gpio_get(2) ? leftSide : rightSide;
+  gpio_put(1, 1);
+  gpio_put(3, 0);
+  sleep_us(10);
+  keyboardSide side2 = gpio_get(2) ? rightSide : leftSide;
   gpio_deinit(2);
   gpio_deinit(1);
   gpio_deinit(3);
-  return side;
+  if (side1 == side2) return side1 == leftSide ? 0 : 1;
+
+  return 255;
 }
 
-void localReader_initSide(LocalReader *self)
+void localReader_discoverTypeSideAndVersion(LocalReader *self)
 {
-  self->side = readKeyboardSide();
-  uint8_t *sel_pins = (self->side == leftSide) ? left_sel_pins : right_sel_pins;
-  for (int i = 0; i < N_SEL_PINS; i++) {
-    self->sel_pin[i] = sel_pins[i];
+  self->hw_version = readKeyboardVersion();
+  switch (self->hw_version) {
+    case 0:
+      self->kb_type = hall;
+      self->side = leftSide;
+      self->sel_pins = left_sel_pins;
+      self->hwIdToKeyId = leftHallHwIdToSwId;
+      comm_init(1);
+      break;
+    case 1:
+      self->kb_type = hall;
+      self->side = rightSide;
+      self->sel_pins = right_sel_pins;
+      self->hwIdToKeyId = rightHallHwIdToSwId;
+      comm_init(1);
+      break;
+    case 2:
+      self->kb_type = contact;
+      self->side = rightSide;
+      self->sel_pins = NULL;
+      self->hwIdToKeyId = rightContactHwIdToSwId;
+      comm_init(0);
+      break;
+    default:
+      self->side = noSide;
   }
-  localReader__initGPIO(self);
 }
 
 void localReader_init(LocalReader *self, Controller *controller)
 {
-  localReader__initADC(self);
-  localReader_initSide(self);
-  init_keys(self->keys, self->side, controller);
+  localReader_discoverTypeSideAndVersion(self);
+  if (self->side == noSide) return;
+  if (self->kb_type == hall) {
+    localReader__initHallGPIO(self);
+    for (int8_t hwId = 0; hwId < N_HALL_HWKEYS; hwId++) {
+      int8_t keyId = self->hwIdToKeyId[hwId];
+      if (keyId != -1) {
+        Key *key = Key_keyWithId(keyId);
+        key_setMinRawRange(key, 100);
+      }
+    }
+  } else {
+    localReader__initContactGPIO(self);
+  }
 }
 
 keyboardSide localReader_keyboardSide(LocalReader *self)
@@ -2180,236 +2350,79 @@ keyboardSide localReader_keyboardSide(LocalReader *self)
   return self->side;
 }
 
-Key *localReader_keys(LocalReader *self)
+void localReader_readContactKeys(LocalReader *self)
 {
-  return self->keys;
+  uint32_t new, filtered;
+  static uint32_t old = 0;
+  static const uint32_t mask = 0b00111100000000001111111111111100;
+  static uint32_t oldmask = 0;
+  new = gpio_get_all();
+  filtered = ((~new) & mask) & ~oldmask;
+  filtered |= old & oldmask;
+  // debouncing
+  #define MAX_TIMERS 10
+  static uint8_t ntimers = 0;
+  static uint8_t ifirst = 0;
+  static uint32_t timers[MAX_TIMERS];
+  static uint32_t masks[MAX_TIMERS];
+  if (ntimers > 0) {
+    while (ntimers > 0 && status.now - timers[ifirst] > 10000) {
+      oldmask &= ~masks[ifirst];
+      ntimers--;
+      ifirst = (ifirst + 1) % MAX_TIMERS;
+    }
+  } 
+  //
+  uint32_t diff = filtered ^ old;
+  if (diff == 0) return;
+  if (ntimers < MAX_TIMERS) {
+    uint8_t inext = (ifirst + ntimers) % MAX_TIMERS;
+    timers[inext] = status.now;
+    oldmask |= diff;
+    masks[inext] = diff;
+    ntimers++;
+  }
+  //
+  while (diff != 0) {
+    int bit = __builtin_ffs(diff)-1;// stdc_first_trailing_one(diff) - 1;
+    uint32_t bitmask = 1 << bit;
+    int val = filtered & bitmask;
+    Key *key = Key_keyWithId(self->hwIdToKeyId[bit]);
+    key_setVal(key, val == 0 ? 0 : 9);
+    diff &= ~bitmask;
+  }
+  old = filtered;
+  
+  return;
 }
 
-void localReader_readKeys(LocalReader *self)
+void localReader_readHallKeys(LocalReader *self)
 {
   uint8_t keyId = 0;
-  Key *key = &self->keys[0];
   for (int sel=0; sel < N_SEL_PINS; sel++) {
-    uint pin = self->sel_pin[sel];
+    uint pin = self->sel_pins[sel];
     gpio_put(pin, 1);
     for (int ana=0; ana < N_ANA_PINS; ana++) {
       adc_select_input(ana);
       uint16_t raw = adc_read();
-      key_setNewRaw(&self->keys[keyId], raw);
+      Key *key = Key_keyWithId(self->hwIdToKeyId[keyId]);
+      key_setNewRaw(key, raw);
       keyId++;
     }
     gpio_put(pin, 0);
     sleep_us(50);
   }
 }
-
-void localReader_processKeys(LocalReader *self)
+void localReader_readKeys(LocalReader *self)
 {
-  for (uint8_t keyId=0; keyId < N_HWKEYS; keyId++) {
-    Key *key = &self->keys[keyId];
-    key_processChanges(key);
+  switch (self->kb_type) {
+    case hall:
+      return localReader_readHallKeys(self);
+    case contact:
+      return localReader_readContactKeys(self);
   }
 }
-
-void localReader_sendKeys(LocalReader *self)
-{
-  for (uint8_t keyId=0; keyId < N_HWKEYS; keyId++) {
-    Key *key = &self->keys[keyId];
-    key_send(key);
-  }
-  uart_send_key_end();
-}
-
-// RemoteReader {{{1
-typedef struct {
-  Key keys[N_HWKEYS];
-} RemoteReader;
-
-void remoteReader_init(RemoteReader *self, Controller *controller, keyboardSide side)
-{
-  init_keys(self->keys, side, controller);
-}
-
-void remoteReader_readKeys(RemoteReader *self)
-{
-  uint8_t val;
-  uint8_t keyId;
-  while (uart_receive_key_val(&keyId, &val)) {
-    Key *key = &self->keys[keyId];
-    key_setVal(key, val);
-  }
-}
-
-void remoteReader_processKeys(RemoteReader *self)
-{
-  for (uint8_t keyId = 0; keyId < N_HWKEYS; keyId++) {
-    Key *key = &self->keys[keyId];
-    key_processChanges(key);
-  }
-}
-
-// main {{{1
-void log_keys(Key *keys)
-{
-  static uint32_t t0 = 0;
-  static uint16_t ct = 0;
-
-  if ((log_level & LOG_L) != 0) {
-    ct++;
-    if (ct == 1000) {
-      uint32_t t1 = time_us_32();
-      printf("%s(%c) ", mySide == leftSide ? "LEFT" : "RIGHT", usbSide == leftSide ? 'L' : usbSide == rightSide ? 'R' : 'N');
-      printf("L%d ", controller_singleton->currentLayer);
-      printf("%uHz\n", ct * 1000000u / (t1 - t0));
-      for (int i = 0; i < N_HWKEYS; i++) {
-        printf("%5u", keys[i].minRaw_S >> 13);
-      }
-      putchar_raw('\n');
-      for (int i = 0; i < N_HWKEYS; i++) {
-        printf("%5u", keys[i].maxRaw_S >> 13);
-      }
-      printf("\n");
-      for (int i = 0; i < N_HWKEYS; i++) {
-        printf("%5u", (keys[i].maxRaw_S - keys[i].minRaw_S) >> 13);
-      }
-      printf("\n");
-      for (int i = 0; i < N_HWKEYS; i++) {
-        printf("%5u", keys[i].rawValue);
-      }
-      printf("\n");
-      fflush(stdout);
-      t0 = time_us_32();
-      ct = 0;
-    }
-  }
-}
-
-void fatal(char *msg)
-{
-  while (true) {
-    printf("FATAL ERROR: %s\n", msg);
-    led_set_rgb(100, 0, 0);
-    sleep_ms(500);
-    led_set_rgb(0, 0, 0);
-    sleep_ms(500);
-  }
-}
-
-void hardware_init()
-{
-  board_init();
-  stdio_init_all();
-  stdio_set_translate_crlf(&stdio_usb, false);
-
-  uart_init(UART_ID, BAUD_RATE);
-  uart_set_fifo_enabled(UART_ID, true);
-  gpio_set_function(UART_TX_PIN, GPIO_FUNC_UART);
-  gpio_set_function(UART_RX_PIN, GPIO_FUNC_UART);
-
-  led_init();
-}
-
-void synchronizeAndDecideUsbSide()
-{
-  // normal case: usbSide sends 'M', other side receives it
-  // other cases:
-  //   usbSide lost USB connection, sends 'm'; other side:
-  //     has USB connection, becomes new usbSide, sends 'M'
-  //     has no connection, usbSide becomes noSide, sends 'm'
-  //   usbSide is noSide, left side decides, sends 'M' or 'm'
-  //     right side receives, if 'M', left is new usbSide; if 'm',
-  //     if right side has usb connection, it becomes new usbSide, sends 'M'
-  //     else, sends 'm' and usbSide remains noSide
-  if (usbSide == mySide) {
-    if (usbReady && !toggleUsbSide) {
-      uart_putc_raw(UART_ID, 'M');
-    } else {
-      setUsbSide(noSide);
-      uart_putc_raw(UART_ID, 'm');
-      uint8_t c = uart_getc(UART_ID);
-      if (c == 'M') setUsbSide(otherSide);
-    }
-  } else if (usbSide == otherSide) {
-    uint8_t c = uart_getc(UART_ID);
-    if (c == 'm') {
-      if (usbReady) {
-        setUsbSide(mySide);
-        uart_putc_raw(UART_ID, 'M');
-      } else {
-        setUsbSide(noSide);
-        uart_putc_raw(UART_ID, 'm');
-      }
-    }
-  } else {
-    if (mySide == leftSide) {
-      if (usbReady) {
-        setUsbSide(mySide);
-        uart_putc_raw(UART_ID, 'M');
-      } else {
-        uart_putc_raw(UART_ID, 'm');
-        uint8_t c = uart_getc(UART_ID);
-        if (c == 'M') setUsbSide(otherSide);
-      }
-    } else {
-      uint8_t c = uart_getc(UART_ID);
-      if (c == 'm') {
-        if (usbReady) {
-          setUsbSide(mySide);
-          uart_putc_raw(UART_ID, 'M');
-        } else {
-          setUsbSide(noSide);
-          uart_putc_raw(UART_ID, 'm');
-        }
-      } else {
-        setUsbSide(otherSide);
-      }
-    }
-  }
-  toggleUsbSide = false;
-
-  led_updateColor();
-
-}
-
-int main()
-{
-  USB usb;
-  Controller controller;
-  LocalReader localReader;
-  RemoteReader remoteReader;
-
-  hardware_init();
-  usb_init(&usb);
-  controller_init(&controller, &usb);
-
-  localReader_init(&localReader, &controller);
-  mySide = localReader_keyboardSide(&localReader);
-  if (mySide == noSide) fatal("Cannot determine keyboard side");
-  otherSide = (mySide == leftSide) ? rightSide : leftSide;
-  remoteReader_init(&remoteReader, &controller, otherSide);
-
-  setUsbSide(noSide);
-
-  while (true) {
-    if (usbSide == mySide) {
-      localReader_readKeys(&localReader);
-      remoteReader_readKeys(&remoteReader);
-      remoteReader_processKeys(&remoteReader);
-      localReader_processKeys(&localReader);
-      controller_task(&controller);
-    }
-    if (usbSide == otherSide) {
-      localReader_readKeys(&localReader);
-      localReader_sendKeys(&localReader);
-    }
-    usb_task(&usb);
-    synchronizeAndDecideUsbSide();
-
-    log_keys(localReader_keys(&localReader));
-  }
-  return 0;
-}
-
+// }}}
 // USB callbacks {{{1
 #if 0
 //--------------------------------------------------------------------+
@@ -2634,4 +2647,223 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     }
   }
 }
+// main {{{
+void log_keys(keyboardSide side, int version)
+{
+  static uint32_t t0 = 0;
+  static uint32_t ct = 1000000;
+  const uint32_t nct = 1000;//00;
 
+  if ((log_level & LOG_L) != 0) {
+    uint8_t firstKeyId, lastKeyId;
+    if (side == leftSide) {
+      firstKeyId = 0;
+      lastKeyId = 17;
+    } else {
+      firstKeyId = 18;
+      lastKeyId = 35;
+    }
+    ct++;
+    if (ct >= nct) {
+      uint32_t t1 = time_us_32();
+      printf("%s(%c)v%d ", status.mySide == leftSide ? "LEFT" : "RIGHT", status.usbActive ? 'U' : '-', version);
+      printf("%d|%d ", v1, v2);
+      printf("L%d ", controller_singleton->currentLayer);
+      printf("%ukHz\n", ct * 1000u / (t1 - t0));
+      for (int i = firstKeyId; i <= lastKeyId; i++) {
+        printf("%5u", keys[i].minRaw_S >> 13);
+      }
+      printf("\n");
+      for (int i = firstKeyId; i <= lastKeyId; i++) {
+        printf("%5u", keys[i].maxRaw_S >> 13);
+      }
+      printf("\n");
+      for (int i = firstKeyId; i <= lastKeyId; i++) {
+        printf("%5u", (keys[i].maxRaw_S - keys[i].minRaw_S) >> 13);
+      }
+      printf("\n");
+      for (int i = firstKeyId; i <= lastKeyId; i++) {
+        printf("%5u", keys[i].val/*rawValue*/);
+      }
+      printf("\n");
+      for (int i = firstKeyId; i <= lastKeyId; i++) {
+        printf("%5u", keys[i].minRawRange);
+      }
+      printf("\n");
+      fflush(stdout);
+      t0 = time_us_32();
+      ct = 0;
+    }
+  }
+}
+
+void fatal(char *msg)
+{
+  while (true) {
+    printf("FATAL ERROR: %s\n", msg);
+    led_set_rgb(100, 0, 0);
+    sleep_ms(500);
+    led_set_rgb(0, 0, 0);
+    sleep_ms(500);
+  }
+}
+
+void hardware_init()
+{
+  board_init();
+  stdio_init_all();
+  stdio_set_translate_crlf(&stdio_usb, false);
+
+  led_init();
+}
+
+
+void synchronizeAndDecideUsbSide()
+{
+  if (status.usbActive && !status.usbReady) status.toggleUsb = true;
+  if (status.usbActive && status.toggleUsb) status.usbActive = false;
+  if (status.otherSideToggleUsb) {
+    if (status.usbReady) status.usbActive = true;
+    status.otherSideToggleUsb = false;
+  }
+  if (status.otherSideUsbActive) status.usbActive = false;
+  if (status.toggleUsb || (status.now - status.lastSendTimestamp) > 5000) {
+    status.lastSendTimestamp = status.now;
+    comm_sendStatus();
+    status.toggleUsb = false;
+  }
+  if (status.usbActive || status.otherSideUsbActive) status.lastActiveTimestamp = status.now;
+  if ((status.now - status.lastActiveTimestamp) > 15000 && status.commOK && status.mySide == leftSide && status.usbReady) status.usbActive = true;
+  if ((status.now - status.lastActiveTimestamp) > 25000 && status.usbReady) status.usbActive = true;
+
+  led_updateColor();
+}
+
+
+int main()
+{
+  USB usb;
+  Controller controller;
+  LocalReader localReader;
+
+  hardware_init();
+  usb_init(&usb);
+  controller_init(&controller, &usb);
+  Key_init(&controller);
+
+  localReader_init(&localReader, &controller);
+  status.mySide = localReader_keyboardSide(&localReader);
+  if (status.mySide == noSide) fatal("Cannot determine keyboard side");
+  status.otherSide = (status.mySide == leftSide) ? rightSide : leftSide;
+
+  setUsbSide(noSide);
+
+  while (true) {
+    status.now = time_us_32();
+    comm_task();
+    if (status.usbActive) {
+      localReader_readKeys(&localReader);
+      controller_task(&controller);
+    }
+    if (status.otherSideUsbActive) {
+      localReader_readKeys(&localReader);
+      Key_sendChangedKeys(status.mySide);
+    }
+    log_keys(status.mySide, localReader.hw_version);
+    usb_task(&usb);
+    synchronizeAndDecideUsbSide();
+  }
+}
+#if 0
+int xxmain() {
+
+  stdio_set_translate_crlf(&stdio_usb, false);
+  stdio_init_all();
+  /*
+  adc_init();
+  gpio_init(29);
+  gpio_set_dir(29, GPIO_OUT);
+  adc_gpio_init(26);
+  adc_gpio_init(27);
+  adc_gpio_init(28);
+  int v1, v2, v3;
+  bool sel=true;
+  for(;;) {
+    gpio_put(29, sel);
+    sleep_ms(200);
+    sel = !sel;
+    adc_select_input(0);
+    v1 = adc_read();
+    adc_select_input(1);
+    v2 = adc_read();
+    adc_select_input(2);
+    v3 = adc_read();
+    printf("%d %d %d\n", v1, v2, v3);
+    printf("\n");
+  }
+  */
+//  /*
+  gpio_init_mask(0b00111100000000001111111111111100);
+  gpio_pull_up(2);
+  gpio_pull_up(3);
+  gpio_pull_up(4);
+  gpio_pull_up(5);
+  gpio_pull_up(6);
+  gpio_pull_up(7);
+  gpio_pull_up(8);
+  gpio_pull_up(9);
+  gpio_pull_up(10);
+  gpio_pull_up(11);
+  gpio_pull_up(12);
+  gpio_pull_up(13);
+  gpio_pull_up(14);
+  gpio_pull_up(15);
+  gpio_pull_up(26);
+  gpio_pull_up(27);
+  gpio_pull_up(28);
+  gpio_pull_up(29);
+  gpio_set_dir_in_masked(0b00111100000000001111111111111100);
+  for(;;) {
+    uint32_t val = gpio_get_all();
+    printf("%032b\n", val);
+    sleep_ms(200);
+  }
+//  */
+  /*
+  gpio_init(pin);
+  gpio_pull_up(pin);
+  gpio_set_dir(pin, GPIO_IN);
+  while (true) {
+    while(gpio_get(pin));
+    uint32_t t0 = time_us_32();
+    for(int i=0; i<N; i++) {
+      set(i, gpio_get(pin));
+    }
+    int n = 1;
+    bool vv = false;
+    int nn = 0;
+    printf("%u\n", time_us_32()-t0);
+    for(int i=0; i<N; i++) {
+      if (get(i) == vv) {
+        n++;
+      } else {
+        if (n < 50000) nn += n;
+        else {
+          printf("%d%d-%d ", !vv, vv, nn);
+          nn = 0;
+        }
+        printf("%d-%d ", vv, n);
+        n=1;
+        vv=!vv;
+      }
+      //printf("%d", v[i]);
+      //if(i%190 == 189) printf("\n");
+    }
+          printf("%d%d-%d ", !vv, vv, nn);
+        printf("%d-%d ", vv, n);
+    printf("\n");
+    //sleep_ms(200);
+  }
+    */
+}
+#endif
