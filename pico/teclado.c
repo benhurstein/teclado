@@ -831,8 +831,10 @@ typedef struct {
       modifierPress,
       modifierRelease,
     } command;
-    uint8_t keycode;
-    uint8_t modifier;
+    union {
+      keycode_t keycode;
+      modifier_t modifier;
+    };
   } data[KCQ_N];
   uint8_t first;
   uint8_t count;
@@ -861,22 +863,26 @@ void keycodeq_insertData(Keycodeq *self, struct kcq_data data)
 
 void keycodeq_insertKeycodePress(Keycodeq *self, keycode_t keycode)
 {
-  keycodeq_insertData(self, (struct kcq_data){keycodePress, keycode, 0});
+  struct kcq_data data = { .command = keycodePress, .keycode = keycode };
+  keycodeq_insertData(self, data);
 }
 
 void keycodeq_insertKeycodeRelease(Keycodeq *self, keycode_t keycode)
 {
-  keycodeq_insertData(self, (struct kcq_data){keycodeRelease, keycode, 0});
+  struct kcq_data data = { .command = keycodeRelease, .keycode = keycode };
+  keycodeq_insertData(self, data);
 }
 
 void keycodeq_insertModifierPress(Keycodeq *self, modifier_t modifier)
 {
-  keycodeq_insertData(self, (struct kcq_data){modifierPress, 0, modifier});
+  struct kcq_data data = { .command = modifierPress, .modifier = modifier };
+  keycodeq_insertData(self, data);
 }
 
 void keycodeq_insertModifierRelease(Keycodeq *self, modifier_t modifier)
 {
-  keycodeq_insertData(self, (struct kcq_data){modifierRelease, 0, modifier});
+  struct kcq_data data = { .command = modifierRelease, .modifier = modifier };
+  keycodeq_insertData(self, data);
 }
 
 enum command keycodeq_head(Keycodeq *self)
@@ -885,16 +891,6 @@ enum command keycodeq_head(Keycodeq *self)
   return self->data[self->first].command;
 }
 
-enum command keycodeq_remove(Keycodeq *self, keycode_t *keycode_p, modifier_t *modifier_p)
-{
-  if (self->count == 0) return none;
-  enum command command = self->data[self->first].command;
-  *keycode_p = self->data[self->first].keycode;
-  *modifier_p = self->data[self->first].modifier;
-  self->first = (self->first + 1) % KCQ_N;
-  self->count--;
-  return command;
-}
 keycode_t keycodeq_removeKeycode(Keycodeq *self)
 {
   if (self->count == 0) return 0;
