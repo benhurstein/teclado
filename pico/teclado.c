@@ -23,23 +23,23 @@
 
 #define N_SEL_PINS 5
 #define N_ANA_PINS 4
-#define N_HALL_HWKEYS (N_SEL_PINS * N_ANA_PINS)
-#define N_CONTACT_HWKEYS 32
+#define N_ANALOG_HWKKEYS (N_SEL_PINS * N_ANA_PINS)
+#define N_DIGITAL_HWKKEYS 32
 #define N_KEYS 36
 
 uint8_t left_sel_pins[N_SEL_PINS] = { 14, 15, 3, 1, 0 };
 uint8_t right_sel_pins[N_SEL_PINS] = { 0, 1, 3, 6, 7 };
 uint8_t ana_pins[N_ANA_PINS] = { 26, 27, 28, 29 };
 
-int8_t leftHallHwIdToSwId[N_HALL_HWKEYS] = {
+int8_t leftAnalogHwIdToSwId[N_ANALOG_HWKKEYS] = {
   17, 14,  9,  4, 16, 13,  8,  3, 15, 12,
    7,  2, -1, 11,  6,  1, -1, 10,  5,  0,
 };
-int8_t rightHallHwIdToSwId[N_HALL_HWKEYS] = {
+int8_t rightAnalogHwIdToSwId[N_ANALOG_HWKKEYS] = {
   -1, 32, 27, 22, -1, 31, 26, 21, 34, 30,
   25, 20, 35, 29, 24, 19, 33, 28, 23, 18,
 };
-int8_t rightContactHwIdToSwId[N_CONTACT_HWKEYS] = {
+int8_t rightDigitalHwIdToSwId[N_DIGITAL_HWKKEYS] = {
   -1, -1, 18, 20, 19, 25, 21, 26, 23, 24, 30, 29, 31, 28, 22, 27,
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 32, 35, 34, 33, -1, -1,
 };
@@ -2241,7 +2241,7 @@ typedef struct {
   int8_t *hwIdToKeyId;
 } LocalReader;
 
-void localReader__initHallGPIO(LocalReader *self)
+void localReader__initAnalogGPIO(LocalReader *self)
 {
   adc_init();
   for (int i = 0; i < N_ANA_PINS; i++) {
@@ -2254,9 +2254,9 @@ void localReader__initHallGPIO(LocalReader *self)
   }
 }
 
-void localReader__initContactGPIO(LocalReader *self)
+void localReader__initDigitalGPIO(LocalReader *self)
 {
-  for (int pin = 0; pin < N_CONTACT_HWKEYS; pin++) {
+  for (int pin = 0; pin < N_DIGITAL_HWKKEYS; pin++) {
     if (self->hwIdToKeyId[pin] != -1) {
       gpio_init(pin);
       gpio_set_dir(pin, GPIO_IN);
@@ -2280,7 +2280,8 @@ static uint16_t readPin(uint sel, uint ana)
 int v1, v2;
 static uint8_t readKeyboardVersion()
 {
-  // hardware type 2 has choc keys and a resistor between pins 28 and 29
+  // hardware type 2 has digital choc keys
+  // it can be recognized because it has a resistor between pins 28 and 29
   adc_init();
   adc_gpio_init(29);
   adc_select_input(3);
@@ -2295,7 +2296,7 @@ static uint8_t readKeyboardVersion()
   gpio_deinit(28);
   if (abs(v1 - v2) > 500) return 2;
 
-  // hardware type 0 and 1 has hall sensors
+  // hardware type 0 and 1 have analog hall sensors
   // on the right keyboard half, pin 2 is connected to pin 1;
   // on the left half, pin 2 is connected to pin 3
   gpio_init(2);
@@ -2328,21 +2329,21 @@ void localReader_discoverTypeSideAndVersion(LocalReader *self)
       self->kb_type = analog;
       self->side = leftSide;
       self->sel_pins = left_sel_pins;
-      self->hwIdToKeyId = leftHallHwIdToSwId;
+      self->hwIdToKeyId = leftAnalogHwIdToSwId;
       comm_init(1);
       break;
     case 1:
       self->kb_type = analog;
       self->side = rightSide;
       self->sel_pins = right_sel_pins;
-      self->hwIdToKeyId = rightHallHwIdToSwId;
+      self->hwIdToKeyId = rightAnalogHwIdToSwId;
       comm_init(1);
       break;
     case 2:
       self->kb_type = digital;
       self->side = rightSide;
       self->sel_pins = NULL;
-      self->hwIdToKeyId = rightContactHwIdToSwId;
+      self->hwIdToKeyId = rightDigitalHwIdToSwId;
       comm_init(0);
       break;
     default:
@@ -2355,8 +2356,8 @@ void localReader_init(LocalReader *self, Controller *controller)
   localReader_discoverTypeSideAndVersion(self);
   if (self->side == noSide) return;
   if (self->kb_type == analog) {
-    localReader__initHallGPIO(self);
-    for (int8_t hwId = 0; hwId < N_HALL_HWKEYS; hwId++) {
+    localReader__initAnalogGPIO(self);
+    for (int8_t hwId = 0; hwId < N_ANALOG_HWKKEYS; hwId++) {
       int8_t keyId = self->hwIdToKeyId[hwId];
       if (keyId != -1) {
         Key *key = Key_keyWithId(keyId);
@@ -2364,7 +2365,7 @@ void localReader_init(LocalReader *self, Controller *controller)
       }
     }
   } else {
-    localReader__initContactGPIO(self);
+    localReader__initDigitalGPIO(self);
   }
 }
 
@@ -2378,7 +2379,7 @@ void localReader_readDigitalKeys(LocalReader *self)
   uint32_t new = gpio_get_all();
   uint8_t bit = 0;
   uint32_t bitmask = 1;
-  while (bit < N_CONTACT_HWKEYS) {
+  while (bit < N_DIGITAL_HWKKEYS) {
     Key *key = Key_keyWithId(self->hwIdToKeyId[bit]);
     if (key != NULL) {
       key_setNewDigitalRaw(key, (new & bitmask) == 0);
@@ -2386,48 +2387,6 @@ void localReader_readDigitalKeys(LocalReader *self)
     bit++;
     bitmask <<= 1;
   }
-  /*
-  uint32_t new, filtered;
-  static uint32_t old = 0;
-  static const uint32_t mask = 0b00111100000000001111111111111100;
-  static uint32_t oldmask = 0;
-  new = gpio_get_all();
-  filtered = ((~new) & mask) & ~oldmask;
-  filtered |= old & oldmask;
-  // debouncing
-  #define MAX_TIMERS 10
-  static uint8_t ntimers = 0;
-  static uint8_t ifirst = 0;
-  static uint32_t timers[MAX_TIMERS];
-  static uint32_t masks[MAX_TIMERS];
-  if (ntimers > 0) {
-    while (ntimers > 0 && status.now - timers[ifirst] > 10000) {
-      oldmask &= ~masks[ifirst];
-      ntimers--;
-      ifirst = (ifirst + 1) % MAX_TIMERS;
-    }
-  } 
-  //
-  uint32_t diff = filtered ^ old;
-  if (diff == 0) return;
-  if (ntimers < MAX_TIMERS) {
-    uint8_t inext = (ifirst + ntimers) % MAX_TIMERS;
-    timers[inext] = status.now;
-    oldmask |= diff;
-    masks[inext] = diff;
-    ntimers++;
-  }
-  //
-  while (diff != 0) {
-    int bit = __builtin_ffs(diff)-1;// stdc_first_trailing_one(diff) - 1;
-    uint32_t bitmask = 1 << bit;
-    int val = filtered & bitmask;
-    Key *key = Key_keyWithId(self->hwIdToKeyId[bit]);
-    key_setVal(key, val == 0 ? 0 : 9);
-    diff &= ~bitmask;
-  }
-  old = filtered;
-  */
 }
 
 void localReader_readAnalogKeys(LocalReader *self)
