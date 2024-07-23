@@ -1241,7 +1241,6 @@ struct key {
   // what to do when key is released
   Action releaseAction;
   // key can be analog or digital
-  uint8_t keyType;
   union {
     struct {
       // last value read from sensor
@@ -1263,6 +1262,7 @@ struct key {
       uint32_t lastChangeTimestamp;
     } /*digital*/;
   };
+  Key *next; // to implement lists of keys in Controller
 };
 
 Key keys[N_KEYS];
@@ -1476,119 +1476,71 @@ void key_setNewDigitalRaw(Key *self, bool newRaw)
 }
 
 // KeyList {{{1
-typedef struct key_list_node KeyListNode;
-typedef struct key_list KeyList;
-
-struct key_list_node {
-  Key *key;
-  KeyListNode *next;
-};
-
-KeyListNode *KeyListNode_create(Key *key, KeyListNode *next)
+// A key can be at most in one controller list.
+// a keylist is implemented as a linked list, using the "next" field in Key
+Key *keyList_removeFirstKey(Key **list)
 {
-  KeyListNode *node = malloc(sizeof(KeyListNode));
-  if (node != NULL) {
-    node->key = key;
-    node->next = next;
-  }
-  return node;
-}
-
-struct key_list {
-  KeyListNode *first;
-  KeyListNode *last;
-};
-
-KeyList *KeyList_create(void)
-{
-  KeyList *self = malloc(sizeof(KeyList));
-  if (self != NULL) {
-    self->first = NULL;
-    self->last = NULL;
-  }
-  return self;
-}
-
-void keyList_print(KeyList *self)
-{
-  printf("[");
-  for (KeyListNode *node = self->first; node != NULL; node = node->next) {
-    printf("%s ", key_description(node->key));
-  }
-  printf("]\n");
-}
-
-bool keyList_empty(KeyList *self)
-{
-  return self->first == NULL;
-}
-
-Key *keyList_firstKey(KeyList *self)
-{
-  if (keyList_empty(self)) return NULL;
-  return self->first->key;
-}
-Key *keyList_removeFirstKey(KeyList *self)
-{
-  if (keyList_empty(self)) return NULL;
-  KeyListNode *node = self->first;
-  Key *key = node->key;
-  self->first = node->next;
-  if (self->first == NULL) self->last = NULL;
-  free(node);
+  Key *key = *list;
+  if (key != NULL) *list = key->next;
   return key;
 }
 
-void keyList_destroy(KeyList *self)
+Key *keyList_firstKey(Key **list)
 {
-  while (!keyList_empty(self)) {
-    keyList_removeFirstKey(self);
-  }
-  free(self);
+  return *list;
 }
 
-void keyList_insertKey(KeyList *self, Key *key)
+bool keyList_empty(Key **list)
 {
-//  printf("before insert %p(%d): ", key, key->keyId); keyList_print(self);
-  KeyListNode *node = KeyListNode_create(key, NULL);
-  assert(node != NULL); // BADABOOM!!!
-  if (keyList_empty(self)) {
-    self->first = self->last = node;
-  } else {
-    self->last->next = node;
-    self->last = node;
-  }
-//  printf("after insert: "); keyList_print(self);
+  return *list == NULL;
 }
 
-void keyList_removeKey(KeyList *self, Key *key)
+void keyList_insertKey(Key **list, Key *key)
 {
-  if (keyList_empty(self)) return;
-  if (self->first->key == key) {
-    keyList_removeFirstKey(self);
-  } else {
-    KeyListNode *prev = self->first;
-    while (true) {
-      KeyListNode *node = prev->next;
-      if (node == NULL) break;
-      if (node->key == key) {
-        prev->next = node->next;
-        if (prev->next == NULL) self->last = prev;
-        free(node);
-        break;
-      }
-      prev = node;
+  key->next = NULL;
+  if (*list == NULL) {
+    *list = key;
+    return;
+  }
+  Key *previous = *list;
+  while (previous->next != NULL) {
+    previous = previous->next;
+  }
+  previous->next = key;
+}
+
+void keyList_removeKey(Key **list, Key *key)
+{
+  if (*list == NULL) return;
+  if (*list == key) {
+    *list = (*list)->next;
+    return;
+  }
+  Key *previous = *list;
+  while (previous->next != NULL) {
+    if (previous->next == key) {
+      previous->next = key->next;
+      return;
     }
+    previous = previous->next;
   }
 }
 
-bool keyList_containsKey(KeyList *self, Key *key)
+bool keyList_containsKey(Key **list, Key *searchedKey)
 {
-  for (KeyListNode *node = self->first; node != NULL; node = node->next) {
-//    printf("testing %p(%d) and %p(%d)\n", key, key->keyId, node->key, node->key->keyId);
-    if (node->key == key) return true;
+  for (Key *key = *list; key != NULL; key = key->next) {
+    if (key == searchedKey) return true;
   }
   return false;
+}
+
+void keyList_print(Key **list)
+{
+  printf("[");
+  for (Key *key = *list; key != NULL; key = key->next) {
+    printf("%s ", key_description(key));
+  }
+  printf("]\n");
 }
 
 // auxiliary functions for unicode {{{1
@@ -1654,8 +1606,10 @@ struct controller {
   layer_id_t baseLayer;
   layer_id_t lockLayer;
   USB *usb;
-  KeyList *waitingKeys;
-  KeyList *keysBeingHeld;
+  /*KeyList *waitingKeys;*/
+  /*KeyList *keysBeingHeld;*/
+  Key *waitingKeys;
+  Key *keysBeingHeld;
   uint32_t waitingKeyTimeout;
   enum holdType holdType;
   keyboardSide holdSide;
@@ -1699,8 +1653,8 @@ void controller_init(Controller *self, USB *usb)
   self->baseLayer = COLEMAK;
   controller__setCurrentLayer(self, COLEMAK);
   self->lockLayer = NO_LAYER;
-  self->waitingKeys = KeyList_create();
-  self->keysBeingHeld = KeyList_create();
+  /*self->waitingKeys = KeyList_create();*/
+  /*self->keysBeingHeld = KeyList_create();*/
   self->holdType = noHoldType;
   self->holdSide = noSide;
   self->moveMouseTimeout = 0;
@@ -1859,7 +1813,7 @@ static void controller__pressKey(Controller *self, Key *key)
       log(LOG_T, "ignoring typing key on same side of held key");
       return;
     }
-    keyList_insertKey(self->keysBeingHeld, key);
+    keyList_insertKey(&self->keysBeingHeld, key);
     action = action_holdAction(&action);
     log(LOG_T, "hold: %s", action_description(&action));
   } else {
@@ -1874,8 +1828,8 @@ static void controller__releaseKey(Controller *self, Key *key)
   Action *action = key_releaseAction(key);
   log(LOG_T, "releaseKey %s %s", key_description(key), action_description(action));
   if (self->holdSide != noSide) {
-    keyList_removeKey(self->keysBeingHeld, key);
-    if (keyList_empty(self->keysBeingHeld)) {
+    keyList_removeKey(&self->keysBeingHeld, key);
+    if (keyList_empty(&self->keysBeingHeld)) {
       self->holdSide = noSide;
     }
   }
@@ -1885,7 +1839,7 @@ static void controller__releaseKey(Controller *self, Key *key)
 
 static void controller__resetWaitingKeyTimeout(Controller *self)
 {
-  if (!keyList_empty(self->waitingKeys)) {
+  if (!keyList_empty(&self->waitingKeys)) {
     self->waitingKeyTimeout = board_millis() + 333;
     if (self->waitingKeyTimeout == 0) self->waitingKeyTimeout = 1;
   } else {
@@ -1896,28 +1850,29 @@ static void controller__resetWaitingKeyTimeout(Controller *self)
 void controller_keyPressed(Controller *self, Key *key)
 {
   log(LOG_T, "keyPressed: %s", key_description(key));
-  if (keyList_empty(self->waitingKeys)) {
+  if (keyList_empty(&self->waitingKeys)) {
     Action *action = &layer[self->currentLayer][key_id(key)];
     if (action_holdType(action) == noHoldType) {
       log(LOG_T, " press action: %s", action_description(action));
       controller__pressKey(self, key);
     } else {
       log(LOG_T, "key wait 1");
-      keyList_insertKey(self->waitingKeys, key);
+      keyList_insertKey(&self->waitingKeys, key);
       controller__resetWaitingKeyTimeout(self);
     }
   } else {
     log(LOG_T, " key wait 2");
-    keyList_insertKey(self->waitingKeys, key);
+    keyList_insertKey(&self->waitingKeys, key);
     controller__resetWaitingKeyTimeout(self);
   }
 }
 
 void controller_holdWaitingKeysUntilKey(Controller *self, Key *lastKey)
 {
-  self->holdSide = key_side(keyList_firstKey(self->waitingKeys));
-  while (!keyList_empty(self->waitingKeys)) {
-    Key *key = keyList_removeFirstKey(self->waitingKeys);
+  if (keyList_empty(&self->waitingKeys)) return;
+  self->holdSide = key_side(keyList_firstKey(&self->waitingKeys));
+  while (!keyList_empty(&self->waitingKeys)) {
+    Key *key = keyList_removeFirstKey(&self->waitingKeys);
     controller__pressKey(self, key);
     if (key == lastKey) {
       break;
@@ -1930,12 +1885,12 @@ void controller_keyReleased(Controller *self, Key *key)
   Action delayedAction = self->delayedReleaseAction;
   self->delayedReleaseAction = Action_noAction();
   log(LOG_T, "keyReleased: %s", key_description(key));
-  if (keyList_containsKey(self->waitingKeys, key)) {
+  if (keyList_containsKey(&self->waitingKeys, key)) {
     log(LOG_T, " was waiting");
-    Key *firstKey = keyList_firstKey(self->waitingKeys);
+    Key *firstKey = keyList_firstKey(&self->waitingKeys);
     if (firstKey == key) { // it's a tap
       log(LOG_T, " it's a tap (%s)", key_description(key));
-      keyList_removeFirstKey(self->waitingKeys);
+      keyList_removeFirstKey(&self->waitingKeys);
       controller__pressKey(self, key);
     } else { // it's a hold
       log(LOG_T, " it's a hold (%s, first %s)", key_description(key), key_description(firstKey));
@@ -2207,8 +2162,8 @@ void controller_doCommand(Controller *self, int command)
   }
   printf("%s(%d) not implemented\n", __func__, command);
   printf("Layers: current=%d base=%d\n", self->currentLayer, self->baseLayer);
-  printf("waiting: "); keyList_print(self->waitingKeys);
-  printf("being held: "); keyList_print(self->keysBeingHeld);
+  printf("waiting: "); keyList_print(&self->waitingKeys);
+  printf("being held: "); keyList_print(&self->keysBeingHeld);
   self->baseLayer = COLEMAK;
   controller__setCurrentLayer(self, COLEMAK);
 }
