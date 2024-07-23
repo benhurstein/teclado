@@ -48,7 +48,7 @@ int8_t rightContactHwIdToSwId[N_CONTACT_HWKEYS] = {
 
 // status {{{1
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
-typedef enum { hall, contact } keyboardType;
+typedef enum { analog, digital } keyboardType;
 struct {
   keyboardSide mySide;
   bool usbReady;
@@ -1237,24 +1237,36 @@ struct key {
   Controller *controller;
   // key id, O-17 for left (0=Q,1=W), 18-35 for right (18=Y,19=U)
   int8_t keyId;
-  // last value read from sensor
-  uint16_t rawValue;
-  uint16_t minRawRange;
-  // scaled values, for filtering
-  uint32_t minRaw_S;
-  uint32_t maxRaw_S;
-  uint32_t filteredRaw_S;
   // current state, a 0 to 9 value and a pressed state
   int8_t val;
   bool pressed;
-  // minimum value since key was released and maximum value since key was pressed
-  //   a key press/release is recognized relative to these values
-  int8_t minVal;
-  int8_t maxVal;
-  // what to do when key is released
-  Action releaseAction;
   bool valChanged;
   bool pressChanged;
+  // what to do when key is released
+  Action releaseAction;
+  // key can be analog or digital
+  uint8_t keyType;
+  union {
+    struct {
+      // last value read from sensor
+      uint16_t rawValue;
+      uint16_t minRawRange;
+      // scaled values, for filtering
+      uint32_t minRaw_S;
+      uint32_t maxRaw_S;
+      uint32_t filteredRaw_S;
+      // minimum value since key was released and maximum value since key was pressed
+      //   a key press/release is recognized relative to these values
+      int8_t minVal;
+      int8_t maxVal;
+    } /*analog*/;
+    struct {
+      bool lastDigitalValue;
+      bool rawDigitalValue;
+      bool ignoreNewValues;
+      uint32_t lastChangeTimestamp;
+    } /*digital*/;
+  };
 };
 
 Key keys[N_KEYS];
@@ -1454,6 +1466,18 @@ void key_setNewRaw(Key *self, uint16_t newRaw)
   }
 }
 
+void key_setNewDigitalRaw(Key *self, bool newRaw)
+{
+  self->rawDigitalValue = newRaw;
+  if (self->ignoreNewValues && (status.now - self->lastChangeTimestamp) > 5000)
+    self->ignoreNewValues = false;
+  if (self->ignoreNewValues) return;
+  if (newRaw == self->lastDigitalValue) return;
+  self->lastDigitalValue = newRaw;
+  self->lastChangeTimestamp = status.now;
+  self->ignoreNewValues = true;
+  key_setVal(self, newRaw ? 9 : 0);
+}
 
 // KeyList {{{1
 typedef struct key_list_node KeyListNode;
@@ -2270,7 +2294,6 @@ static uint8_t readKeyboardVersion()
   v2 = adc_read();
   gpio_deinit(28);
   if (abs(v1 - v2) > 500) return 2;
-  return 2;
 
   // hardware type 0 and 1 has hall sensors
   // on the right keyboard half, pin 2 is connected to pin 1;
@@ -2302,21 +2325,21 @@ void localReader_discoverTypeSideAndVersion(LocalReader *self)
   self->hw_version = readKeyboardVersion();
   switch (self->hw_version) {
     case 0:
-      self->kb_type = hall;
+      self->kb_type = analog;
       self->side = leftSide;
       self->sel_pins = left_sel_pins;
       self->hwIdToKeyId = leftHallHwIdToSwId;
       comm_init(1);
       break;
     case 1:
-      self->kb_type = hall;
+      self->kb_type = analog;
       self->side = rightSide;
       self->sel_pins = right_sel_pins;
       self->hwIdToKeyId = rightHallHwIdToSwId;
       comm_init(1);
       break;
     case 2:
-      self->kb_type = contact;
+      self->kb_type = digital;
       self->side = rightSide;
       self->sel_pins = NULL;
       self->hwIdToKeyId = rightContactHwIdToSwId;
@@ -2331,7 +2354,7 @@ void localReader_init(LocalReader *self, Controller *controller)
 {
   localReader_discoverTypeSideAndVersion(self);
   if (self->side == noSide) return;
-  if (self->kb_type == hall) {
+  if (self->kb_type == analog) {
     localReader__initHallGPIO(self);
     for (int8_t hwId = 0; hwId < N_HALL_HWKEYS; hwId++) {
       int8_t keyId = self->hwIdToKeyId[hwId];
@@ -2350,8 +2373,20 @@ keyboardSide localReader_keyboardSide(LocalReader *self)
   return self->side;
 }
 
-void localReader_readContactKeys(LocalReader *self)
+void localReader_readDigitalKeys(LocalReader *self)
 {
+  uint32_t new = gpio_get_all();
+  uint8_t bit = 0;
+  uint32_t bitmask = 1;
+  while (bit < N_CONTACT_HWKEYS) {
+    Key *key = Key_keyWithId(self->hwIdToKeyId[bit]);
+    if (key != NULL) {
+      key_setNewDigitalRaw(key, (new & bitmask) == 0);
+    }
+    bit++;
+    bitmask <<= 1;
+  }
+  /*
   uint32_t new, filtered;
   static uint32_t old = 0;
   static const uint32_t mask = 0b00111100000000001111111111111100;
@@ -2392,11 +2427,10 @@ void localReader_readContactKeys(LocalReader *self)
     diff &= ~bitmask;
   }
   old = filtered;
-  
-  return;
+  */
 }
 
-void localReader_readHallKeys(LocalReader *self)
+void localReader_readAnalogKeys(LocalReader *self)
 {
   uint8_t keyId = 0;
   for (int sel=0; sel < N_SEL_PINS; sel++) {
@@ -2416,10 +2450,10 @@ void localReader_readHallKeys(LocalReader *self)
 void localReader_readKeys(LocalReader *self)
 {
   switch (self->kb_type) {
-    case hall:
-      return localReader_readHallKeys(self);
-    case contact:
-      return localReader_readContactKeys(self);
+    case analog:
+      return localReader_readAnalogKeys(self);
+    case digital:
+      return localReader_readDigitalKeys(self);
   }
 }
 // }}}
@@ -2647,7 +2681,8 @@ void tud_hid_set_report_cb(uint8_t instance, uint8_t report_id, hid_report_type_
     }
   }
 }
-// main {{{
+
+// main {{{1
 void log_keys(keyboardSide side, int version)
 {
   static uint32_t t0 = 0;
@@ -2667,27 +2702,34 @@ void log_keys(keyboardSide side, int version)
     if (ct >= nct) {
       uint32_t t1 = time_us_32();
       printf("%s(%c)v%d ", status.mySide == leftSide ? "LEFT" : "RIGHT", status.usbActive ? 'U' : '-', version);
-      printf("%d|%d ", v1, v2);
       printf("L%d ", controller_singleton->currentLayer);
-      printf("%ukHz\n", ct * 1000u / (t1 - t0));
-      for (int i = firstKeyId; i <= lastKeyId; i++) {
-        printf("%5u", keys[i].minRaw_S >> 13);
+      if (version == 2 || version ==  3) {
+        printf("%d|%d ", v1, v2);
+        printf("%ukHz\n", ct * 1000u / (t1 - t0));
+        for (int i = firstKeyId; i <= lastKeyId; i++) {
+          printf("%5u", keys[i].rawDigitalValue);
+        }
+      } else if (version == 0 || version == 1) {
+        printf("%uHz\n", ct * 1000000u / (t1 - t0));
+        for (int i = firstKeyId; i <= lastKeyId; i++) {
+          printf("%5u", keys[i].minRaw_S >> 13);
+        }
+        printf("\n");
+        for (int i = firstKeyId; i <= lastKeyId; i++) {
+          printf("%5u", keys[i].maxRaw_S >> 13);
+        }
+        printf("\n");
+        for (int i = firstKeyId; i <= lastKeyId; i++) {
+          printf("%5u", (keys[i].maxRaw_S - keys[i].minRaw_S) >> 13);
+        }
+        printf("\n");
+        for (int i = firstKeyId; i <= lastKeyId; i++) {
+          printf("%5u", keys[i].rawValue);
+        }
       }
       printf("\n");
       for (int i = firstKeyId; i <= lastKeyId; i++) {
-        printf("%5u", keys[i].maxRaw_S >> 13);
-      }
-      printf("\n");
-      for (int i = firstKeyId; i <= lastKeyId; i++) {
-        printf("%5u", (keys[i].maxRaw_S - keys[i].minRaw_S) >> 13);
-      }
-      printf("\n");
-      for (int i = firstKeyId; i <= lastKeyId; i++) {
-        printf("%5u", keys[i].val/*rawValue*/);
-      }
-      printf("\n");
-      for (int i = firstKeyId; i <= lastKeyId; i++) {
-        printf("%5u", keys[i].minRawRange);
+        printf("%5u", keys[i].val);
       }
       printf("\n");
       fflush(stdout);
@@ -2761,12 +2803,10 @@ int main()
   while (true) {
     status.now = time_us_32();
     comm_task();
+    localReader_readKeys(&localReader);
     if (status.usbActive) {
-      localReader_readKeys(&localReader);
       controller_task(&controller);
-    }
-    if (status.otherSideUsbActive) {
-      localReader_readKeys(&localReader);
+    } else if (status.otherSideUsbActive) {
       Key_sendChangedKeys(status.mySide);
     }
     log_keys(status.mySide, localReader.hw_version);
