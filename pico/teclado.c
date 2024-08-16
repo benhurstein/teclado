@@ -1266,8 +1266,6 @@ struct key {
   bool pressChanged;
   // what to do when key is released
   Action releaseAction;
-  uint16_t minraw;
-  uint16_t maxraw;
   // key can be analog or digital
   union {
     struct {
@@ -1476,8 +1474,6 @@ static int constrain(int val, int minimum, int maximum)
 void key_setNewAnalogRaw(Key *self, uint16_t newRaw)
 {
   self->rawAnalogValue = newRaw;
-  if(newRaw < self->minraw) self->minraw = newRaw;
-  if(newRaw > self->maxraw) self->maxraw = newRaw;
   key__filterRawValue(self);
   if (self->keyId == -1) return;
   int minRaw = self->minRaw_S >> 13;
@@ -2662,15 +2658,6 @@ void log_keys(keyboardSide side, int version)
           printf("%5u", keys[i].rawAnalogValue);
         }
         printf("\n");
-        for (int i = firstKeyId; i <= lastKeyId; i++) {
-          printf("%5u", keys[i].minraw);
-        }
-        printf("\n");
-        for (int i = firstKeyId; i <= lastKeyId; i++) {
-          printf("%5u", keys[i].maxraw);
-          keys[i].minraw = 5000;
-          keys[i].maxraw = 0;
-        }
       }
       printf("\n");
       for (int i = firstKeyId; i <= lastKeyId; i++) {
