@@ -232,7 +232,7 @@ Key *Key_keyWithId(uint8_t keyId);
 void key_init(Key *self, Controller *controller, uint8_t keyId);
 int8_t key_id(Key *self);
 keyboardSide key_side(Key *self);
-void key_setNewRaw(Key *self, uint16_t newRaw);
+void key_setNewAnalogRaw(Key *self, uint16_t newRaw);
 void key_setVal(Key *self, uint8_t newVal);
 int8_t key_val(Key *self);
 void key_processChanges(Key *self);
@@ -1240,11 +1240,13 @@ struct key {
   bool pressChanged;
   // what to do when key is released
   Action releaseAction;
+  uint16_t minraw;
+  uint16_t maxraw;
   // key can be analog or digital
   union {
     struct {
       // last value read from sensor
-      uint16_t rawValue;
+      uint16_t rawAnalogValue;
       uint16_t minRawRange;
       // scaled values, for filtering
       uint32_t minRaw_S;
@@ -1353,12 +1355,12 @@ static void key__filterRawValue(Key *self)
 {
   if (self->filteredRaw_S == UINT32_MAX) {
     // if it's the first value, initialize
-    self->filteredRaw_S = self->rawValue << 13;
+    self->filteredRaw_S = self->rawAnalogValue << 13;
     self->maxRaw_S = self->filteredRaw_S;
     self->minRaw_S = self->filteredRaw_S;
     return;
   }
-  filter_SnS(&self->filteredRaw_S, self->rawValue, 13, 2);
+  filter_SnS(&self->filteredRaw_S, self->rawAnalogValue, 13, 2);
   // if value is outside of max or min limits, fast drift min or max to value
   if (self->filteredRaw_S < self->minRaw_S) {
     filter_SS(&self->minRaw_S, self->filteredRaw_S, 1);
@@ -1445,9 +1447,11 @@ static int constrain(int val, int minimum, int maximum)
   return val;
 }
 
-void key_setNewRaw(Key *self, uint16_t newRaw)
+void key_setNewAnalogRaw(Key *self, uint16_t newRaw)
 {
-  self->rawValue = newRaw;
+  self->rawAnalogValue = newRaw;
+  if(newRaw < self->minraw) self->minraw = newRaw;
+  if(newRaw > self->maxraw) self->maxraw = newRaw;
   key__filterRawValue(self);
   if (self->keyId == -1) return;
   int minRaw = self->minRaw_S >> 13;
@@ -2312,7 +2316,7 @@ void localReader_init(LocalReader *self, Controller *controller)
       int8_t keyId = self->hwIdToKeyId[hwId];
       if (keyId != -1) {
         Key *key = Key_keyWithId(keyId);
-        key_setMinRawRange(key, 100);
+        key_setMinRawRange(key, 80);
       }
     }
   } else {
@@ -2350,7 +2354,7 @@ void localReader_readAnalogKeys(LocalReader *self)
       adc_select_input(ana);
       uint16_t raw = adc_read();
       Key *key = Key_keyWithId(self->hwIdToKeyId[keyId]);
-      key_setNewRaw(key, raw);
+      key_setNewAnalogRaw(key, raw);
       keyId++;
     }
     gpio_put(pin, 0);
@@ -2611,7 +2615,10 @@ void log_keys(keyboardSide side, int version)
     ct++;
     if (ct >= nct) {
       uint32_t t1 = time_us_32();
-      printf("%s(%c)v%d ", status.mySide == leftSide ? "LEFT" : "RIGHT", status.usbActive ? 'U' : '-', version);
+      printf("%s ", status.mySide == leftSide ? "LEFT" : "RIGHT");
+      printf("U:%c%c%c%c ", status.usbReady ? 'R' : 'r', status.usbActive ? 'A' : 'a', status.otherSideUsbReady ? 'R' : 'r', status.otherSideUsbActive ? 'A' : 'a');
+      printf("C:%c ", status.commOK ? 'Y' : 'n');
+      printf("V%d ", version);
       printf("L%d ", controller_singleton->currentLayer);
       if (version == 2 || version ==  3) {
         printf("%d|%d ", v1, v2);
@@ -2634,7 +2641,17 @@ void log_keys(keyboardSide side, int version)
         }
         printf("\n");
         for (int i = firstKeyId; i <= lastKeyId; i++) {
-          printf("%5u", keys[i].rawValue);
+          printf("%5u", keys[i].rawAnalogValue);
+        }
+        printf("\n");
+        for (int i = firstKeyId; i <= lastKeyId; i++) {
+          printf("%5u", keys[i].minraw);
+        }
+        printf("\n");
+        for (int i = firstKeyId; i <= lastKeyId; i++) {
+          printf("%5u", keys[i].maxraw);
+          keys[i].minraw = 5000;
+          keys[i].maxraw = 0;
         }
       }
       printf("\n");
