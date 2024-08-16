@@ -11,13 +11,23 @@
 #include "pico/bootrom.h"
 #include "ws2812.pio.h"
 
-#include "bsp/board.h"
 #include "tusb.h"
 #include "usb_descriptors.h"
 
 // configuration {{{1
+
+// analog values go from 0 to 9. The change needed to detect a key press
 #define SENSITIVITY 6
-#define MOUSE_PERIOD 30
+// time between mouse events when a key is pressed
+#define MOUSE_PERIOD_MS 30u
+// time between pressing a key and it being considered held (not tapped)
+#define HOLD_DELAY_MS 333u
+// time to wait for second key press to lock a layer
+#define LOCK_DELAY_MS 200u
+// ignore changes in digital key during this time to debounce it
+#define DEBOUNCING_DELAY_MS 20u
+// period to send kb status to other side
+#define COMM_STATUS_DELAY_MS 20u
 
 #define BAUD_RATE 500000
 
@@ -44,8 +54,6 @@ int8_t rightDigitalHwIdToSwId[N_DIGITAL_HWKKEYS] = {
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 32, 35, 34, 33, -1, -1,
 };
 
-#define LOCK_DELAY_MS 200
-
 // status {{{1
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
 typedef enum { analog, digital } keyboardType;
@@ -64,6 +72,22 @@ struct {
   uint32_t lastSendTimestamp;
   uint32_t lastActiveTimestamp;
 } status;
+
+void update_now() {
+  status.now = time_us_32();
+  if (status.now == 0) status.now = 1;
+}
+
+void setTimestamp(uint32_t *timestamp) {
+  *timestamp = status.now;
+}
+
+static inline bool elapsed_ms(uint32_t *timestamp, uint32_t delay) {
+  if (*timestamp == 0) return false;
+  if ((status.now - *timestamp) < (delay * 1000)) return false;
+  *timestamp = 0;
+  return true;
+}
 
 // types {{{1
 typedef enum {
@@ -1194,6 +1218,7 @@ void comm_sendStatus()
   if (status.usbActive)           val |= 0b0100;
   if (status.toggleUsb)           val |= 0b1000;
   comm_sendMessage(62, val);
+  setTimestamp(&status.lastSendTimestamp);
 }
 
 void comm_task()
@@ -1202,7 +1227,7 @@ void comm_task()
   uint8_t msgId;
   while (comm_receiveMessage(&msgId, &msgVal)) {
     status.commOK = true;
-    status.lastReceiveTimestamp = status.now;
+    setTimestamp(&status.lastReceiveTimestamp);
     Key *key = Key_keyWithId(msgId);
     if (key != NULL) {
       if (msgVal > 9) {
@@ -1221,7 +1246,8 @@ void comm_task()
       log(LOG_C, "Err comm3 invalid id: [%02hhx %02hhx] %d/%d", msgId, msgVal, comm_error_count, comm_received_message_count);
     }
   }
-  if (status.commOK && (status.lastReceiveTimestamp - status.now) < 10000) status.commOK = false;;
+  if (status.commOK && elapsed_ms(&status.lastReceiveTimestamp, COMM_STATUS_DELAY_MS * 2))
+    status.commOK = false;
 }
 
 
@@ -1469,12 +1495,13 @@ void key_setNewAnalogRaw(Key *self, uint16_t newRaw)
 void key_setNewDigitalRaw(Key *self, bool newRaw)
 {
   self->rawDigitalValue = newRaw;
-  if (self->ignoreNewValues && (status.now - self->lastChangeTimestamp) > 5000)
+  if (self->ignoreNewValues
+      && elapsed_ms(&self->lastChangeTimestamp, DEBOUNCING_DELAY_MS))
     self->ignoreNewValues = false;
   if (self->ignoreNewValues) return;
   if (newRaw == self->lastDigitalValue) return;
   self->lastDigitalValue = newRaw;
-  self->lastChangeTimestamp = status.now;
+  setTimestamp(&self->lastChangeTimestamp);
   self->ignoreNewValues = true;
   key_setVal(self, newRaw ? 9 : 0);
 }
@@ -1610,14 +1637,12 @@ struct controller {
   layer_id_t baseLayer;
   layer_id_t lockLayer;
   USB *usb;
-  /*KeyList *waitingKeys;*/
-  /*KeyList *keysBeingHeld;*/
   Key *waitingKeys;
   Key *keysBeingHeld;
-  uint32_t waitingKeyTimeout;
+  uint32_t waitingKeyTimestamp;
   enum holdType holdType;
   keyboardSide holdSide;
-  uint32_t moveMouseTimeout;
+  uint32_t moveMouseTimestamp;
   int16_t mousePos_v;
   int16_t mousePos_h;
   int16_t mousePos_wv;
@@ -1630,23 +1655,13 @@ struct controller {
   uint32_t changeLayerTimestamp;
 } *controller_singleton;
 
-static void controller__setMoveMouseTimeout(Controller *self, int interval_ms)
-{
-  if (interval_ms == 0) {
-    self->moveMouseTimeout = 0;
-  } else {
-    self->moveMouseTimeout = board_millis() + interval_ms;
-    if (self->moveMouseTimeout == 0) self->moveMouseTimeout++;
-  }
-}
-
 static void controller__setCurrentLayer(Controller *self, layer_id_t layer_id)
 {
   self->currentLayer = layer_id;
   if (layer_hasMouseMovementAction(layer_id)) {
-    controller__setMoveMouseTimeout(self, MOUSE_PERIOD);
+    setTimestamp(&self->moveMouseTimestamp);
   } else {
-    controller__setMoveMouseTimeout(self, 0);
+    self->moveMouseTimestamp = 0;
   }
 }
 void controller_init(Controller *self, USB *usb)
@@ -1661,7 +1676,7 @@ void controller_init(Controller *self, USB *usb)
   /*self->keysBeingHeld = KeyList_create();*/
   self->holdType = noHoldType;
   self->holdSide = noSide;
-  self->moveMouseTimeout = 0;
+  self->moveMouseTimestamp = 0;
   self->delayedReleaseAction = Action_noAction();
   self->modifiers = 0;
   self->wordLocked = false;
@@ -1767,12 +1782,9 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
     self->lockLayer = NO_LAYER;
     controller__setCurrentLayer(self, self->baseLayer);
   } else {
-    uint32_t now = board_millis();
-    if (self->changeLayerTimestamp == 0
-        || self->changeToLayer != layer
-        || now - self->changeLayerTimestamp > LOCK_DELAY_MS) {
+    if (self->changeToLayer != layer) {
       // mark and wait for second tap
-      self->changeLayerTimestamp = now;
+      setTimestamp(&self->changeLayerTimestamp);
       self->changeToLayer = layer;
     } else {
       // lock on second tap
@@ -1785,12 +1797,9 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
 void controller_changeBaseLayer(Controller *self, layer_id_t layer)
 {
   log(LOG_T, "%s(%d)", __func__, layer);
-  uint32_t now = board_millis();
-  if (self->changeLayerTimestamp == 0
-    || self->changeToLayer != layer
-    || now - self->changeLayerTimestamp > LOCK_DELAY_MS) {
+  if (self->changeToLayer != layer) {
     // mark and wait for second tap
-    self->changeLayerTimestamp = now;
+    setTimestamp(&self->changeLayerTimestamp);
     self->changeToLayer = layer;
   } else {
     // change base layer on second tap
@@ -1844,10 +1853,9 @@ static void controller__releaseKey(Controller *self, Key *key)
 static void controller__resetWaitingKeyTimeout(Controller *self)
 {
   if (!keyList_empty(&self->waitingKeys)) {
-    self->waitingKeyTimeout = board_millis() + 333;
-    if (self->waitingKeyTimeout == 0) self->waitingKeyTimeout = 1;
+    setTimestamp(&self->waitingKeyTimestamp);
   } else {
-    self->waitingKeyTimeout = 0;
+    self->waitingKeyTimestamp = 0;
   }
 }
 
@@ -1884,6 +1892,18 @@ void controller_holdWaitingKeysUntilKey(Controller *self, Key *lastKey)
   }
 }
 
+void controller_tapWaitingKeysUntilKey(Controller *self, Key *lastKey)
+{
+  if (keyList_empty(&self->waitingKeys)) return;
+  while (!keyList_empty(&self->waitingKeys)) {
+    Key *key = keyList_removeFirstKey(&self->waitingKeys);
+    controller__pressKey(self, key);
+    if (key == lastKey) {
+      break;
+    }
+  }
+}
+
 void controller_keyReleased(Controller *self, Key *key)
 {
   Action delayedAction = self->delayedReleaseAction;
@@ -1892,10 +1912,9 @@ void controller_keyReleased(Controller *self, Key *key)
   if (keyList_containsKey(&self->waitingKeys, key)) {
     log(LOG_T, " was waiting");
     Key *firstKey = keyList_firstKey(&self->waitingKeys);
-    if (firstKey == key) { // it's a tap
+    if (firstKey == key || key_side(firstKey) == key_side(key)) { // it's a tap
       log(LOG_T, " it's a tap (%s)", key_description(key));
-      keyList_removeFirstKey(&self->waitingKeys);
-      controller__pressKey(self, key);
+      controller_tapWaitingKeysUntilKey(self, key);
     } else { // it's a hold
       log(LOG_T, " it's a hold (%s, first %s)", key_description(key), key_description(firstKey));
       controller_holdWaitingKeysUntilKey(self, key);
@@ -2149,7 +2168,7 @@ static void controller__timedMoveMouse(Controller *self)
   }
   // send accumulated movements in one USB event
   controller__sendMouseMovement(self);
-  controller__setMoveMouseTimeout(self, MOUSE_PERIOD);
+  setTimestamp(&self->moveMouseTimestamp);
 }
 
 void controller_doCommand(Controller *self, int command)
@@ -2175,12 +2194,11 @@ void controller_doCommand(Controller *self, int command)
 void controller_task(Controller *self)
 {
   Key_processKeyChanges();
-  if (self->moveMouseTimeout != 0 && board_millis() >= self->moveMouseTimeout) {
-    self->moveMouseTimeout = 0;
+  if (elapsed_ms(&self->changeLayerTimestamp, LOCK_DELAY_MS)) self->changeToLayer = NO_LAYER;
+  if (elapsed_ms(&self->moveMouseTimestamp, MOUSE_PERIOD_MS)) {
     controller__timedMoveMouse(self);
   }
-  if (self->waitingKeyTimeout != 0 && board_millis() >= self->waitingKeyTimeout) {
-    self->waitingKeyTimeout = 0;
+  if (elapsed_ms(&self->waitingKeyTimestamp, HOLD_DELAY_MS)) {
     log(LOG_T, "hold timeout");
     controller_holdWaitingKeysUntilKey(self, NULL);
   }
@@ -2679,9 +2697,10 @@ void fatal(char *msg)
 
 void hardware_init()
 {
-  board_init();
   stdio_init_all();
   stdio_set_translate_crlf(&stdio_usb, false);
+  setTimestamp(&status.lastActiveTimestamp);
+  status.toggleUsb = true;
 
   led_init();
 }
@@ -2696,14 +2715,18 @@ void synchronizeAndDecideUsbSide()
     status.otherSideToggleUsb = false;
   }
   if (status.otherSideUsbActive) status.usbActive = false;
-  if (status.toggleUsb || (status.now - status.lastSendTimestamp) > 5000) {
-    status.lastSendTimestamp = status.now;
+  if (status.toggleUsb || elapsed_ms(&status.lastSendTimestamp, COMM_STATUS_DELAY_MS)) {
     comm_sendStatus();
     status.toggleUsb = false;
   }
-  if (status.usbActive || status.otherSideUsbActive) status.lastActiveTimestamp = status.now;
-  if ((status.now - status.lastActiveTimestamp) > 15000 && status.commOK && status.mySide == leftSide && status.usbReady) status.usbActive = true;
-  if ((status.now - status.lastActiveTimestamp) > 25000 && status.usbReady) status.usbActive = true;
+  if (status.usbActive || status.otherSideUsbActive)
+    setTimestamp(&status.lastActiveTimestamp);
+  if (status.usbReady) {
+    if (status.commOK && status.mySide == leftSide && elapsed_ms(&status.lastActiveTimestamp, COMM_STATUS_DELAY_MS * 3))
+      status.usbActive = true;
+    if (elapsed_ms(&status.lastActiveTimestamp, COMM_STATUS_DELAY_MS * 6))
+      status.usbActive = true;
+  }
 
   led_updateColor();
 }
@@ -2715,6 +2738,7 @@ int main()
   Controller controller;
   LocalReader localReader;
 
+  update_now();
   hardware_init();
   usb_init(&usb);
   controller_init(&controller, &usb);
@@ -2728,7 +2752,7 @@ int main()
   setUsbSide(noSide);
 
   while (true) {
-    status.now = time_us_32();
+    update_now();
     comm_task();
     localReader_readKeys(&localReader);
     if (status.usbActive) {
