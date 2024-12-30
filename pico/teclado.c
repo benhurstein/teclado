@@ -53,6 +53,10 @@ int8_t rightDigitalHwIdToSwId[N_DIGITAL_HWKKEYS] = {
   -1, -1, 18, 20, 19, 25, 21, 26, 23, 24, 30, 29, 31, 28, 22, 27,
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, 32, 35, 34, 33, -1, -1,
 };
+int8_t leftDigitalHwIdToSwId[N_DIGITAL_HWKKEYS] = {
+  -1, -1, 10, 13, 17, 16,  0,  6, 15, 14,  5, 11,  8, 12,  9,  7,
+  -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  3,  1,  2,  4, -1, -1,
+};
 
 // status {{{1
 typedef enum { noSide, leftSide, rightSide } keyboardSide;
@@ -2284,45 +2288,57 @@ static uint16_t readPin(uint sel, uint ana)
 }
 
 int v1, v2;
-static uint8_t readKeyboardVersion()
+static bool detect_resistor(uint8_t pin1, uint8_t pin2)
 {
-  // hardware type 2 has digital choc keys
-  // it can be recognized because it has a resistor between pins 28 and 29
+  // can only detect resistor connecting analog pins (26 to 29)
+  if (pin1 < 26 || pin1 > 29 || pin2 < 26 || pin2 > 29) return false;
+  uint8_t adc1 = pin1 - 26;
   adc_init();
-  adc_gpio_init(29);
-  adc_select_input(3);
-  gpio_init(28);
-  gpio_set_dir(28, GPIO_OUT);
-  gpio_put(28, false);
+  adc_gpio_init(pin1);
+  adc_select_input(adc1);
+  gpio_init(pin2);
+  gpio_set_dir(pin2, GPIO_OUT);
+  gpio_put(pin2, false);
   sleep_us(500);
   v1 = adc_read();
-  gpio_put(28, true);
+  gpio_put(pin2, true);
   sleep_us(500);
   v2 = adc_read();
   gpio_deinit(28);
-  if (abs(v1 - v2) > 500) return 2;
+  return abs(v1 - v2) > 500;
+}
+static bool detect_connection(uint8_t pin1, uint8_t pin2)
+{
+  bool v1, v2;
+  gpio_init(pin1);
+  gpio_set_dir(pin1, GPIO_IN);
+  gpio_init(pin2);
+  gpio_set_dir(pin2, GPIO_OUT);
+  gpio_put(pin2, false);
+  sleep_us(10);
+  v1 = gpio_get(pin1);
+  gpio_put(pin2, true);
+  sleep_us(10);
+  v2 = gpio_get(pin1);
+  gpio_deinit(pin1);
+  gpio_deinit(pin2);
+  return !v1 && v2;
+}
+
+static uint8_t readKeyboardVersion()
+{
+  // hardware type 2 and 3 have digital choc keys
+  // they can be recognized because they have a resistor connecting analog pins.
+  // type 2 is a right half, and has a resistor connecting pins 28 and 29
+  // type 3 is a left half, and has a resistor connecting pins 28 and 26
+  if (detect_resistor(28, 29)) return 2;
+  if (detect_resistor(28, 26)) return 3;
 
   // hardware type 0 and 1 have analog hall sensors
-  // on the right keyboard half, pin 2 is connected to pin 1;
-  // on the left half, pin 2 is connected to pin 3
-  gpio_init(2);
-  gpio_set_dir(2, GPIO_IN);
-  gpio_init(1);
-  gpio_init(3);
-  gpio_set_dir(1, GPIO_OUT);
-  gpio_set_dir(3, GPIO_OUT);
-  gpio_put(1, 0);
-  gpio_put(3, 1);
-  sleep_us(10);
-  keyboardSide side1 = gpio_get(2) ? leftSide : rightSide;
-  gpio_put(1, 1);
-  gpio_put(3, 0);
-  sleep_us(10);
-  keyboardSide side2 = gpio_get(2) ? rightSide : leftSide;
-  gpio_deinit(2);
-  gpio_deinit(1);
-  gpio_deinit(3);
-  if (side1 == side2) return side1 == leftSide ? 0 : 1;
+  // on type 1, the right keyboard half, pin 2 is connected to pin 1;
+  // on type 0, the left half, pin 2 is connected to pin 3
+  if (detect_connection(1, 2)) return 1;
+  if (detect_connection(3, 2)) return 0;
 
   return 255;
 }
@@ -2350,6 +2366,13 @@ void localReader_discoverTypeSideAndVersion(LocalReader *self)
       self->side = rightSide;
       self->sel_pins = NULL;
       self->hwIdToKeyId = rightDigitalHwIdToSwId;
+      comm_init(0);
+      break;
+    case 3:
+      self->kb_type = digital;
+      self->side = leftSide;
+      self->sel_pins = NULL;
+      self->hwIdToKeyId = leftDigitalHwIdToSwId;
       comm_init(0);
       break;
     default:
@@ -2671,15 +2694,16 @@ void log_keys(keyboardSide side, int version)
       printf("%s ", status.mySide == leftSide ? "LEFT" : "RIGHT");
       printf("U:%c%c%c%c ", status.usbReady ? 'R' : 'r', status.usbActive ? 'A' : 'a', status.otherSideUsbReady ? 'R' : 'r', status.otherSideUsbActive ? 'A' : 'a');
       printf("C:%c ", status.commOK ? 'Y' : 'n');
-      printf("%uHz\n", ct);
+      printf("%uHz ", ct);
       printf("V%d ", version);
       printf("L%d ", controller_singleton->currentLayer);
       if (version == 2 || version ==  3) {
-        printf("%d|%d ", v1, v2);
+        printf("%d|%d\n", v1, v2);
         for (int i = firstKeyId; i <= lastKeyId; i++) {
           printf("%5u", keys[i].rawDigitalValue);
         }
       } else if (version == 0 || version == 1) {
+        printf("\n");
         for (int i = firstKeyId; i <= lastKeyId; i++) {
           printf("%5u", keys[i].minRaw_S >> 13);
         }
