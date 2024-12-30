@@ -786,7 +786,7 @@ Action layer[][N_KEYS] = {
     ASC(';', ':'  ), ASC('*', '^'  ), ASC('(', '<'  ), ASC(')', '>'  ), ASC('=', '+'  ),
     ASC('`', '~'  ), ASC('!', '$'  ), ASC('@', '%'  ), ASC('#', '&'  ), ASC('\\','|'  ),
     KEY(K_ESC     ), KEY(K_SPC     ), KEY(K_TAB     ),
-    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       NO_ACTION,
+    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       COM(USB_SIDE  ),
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
     NO_ACTION,       LCK(SYM       ), LCK(NAV       ), MOD(RALT      ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
@@ -2217,6 +2217,7 @@ void controller_doCommand(Controller *self, int command)
     reset_usb_boot(0, 0);
     return;
   } else if (command == USB_SIDE) {
+    printf("CMD: USB_SIDE\n");
     status.toggleUsb = true;
     return;
   }
@@ -2755,17 +2756,16 @@ void hardware_init()
 
 void synchronizeAndDecideUsbSide()
 {
+  bool shouldSendStatus = timer_elapsed(&send_timer);
   if (status.usbActive && !status.usbReady) status.toggleUsb = true;
   if (status.usbActive && status.toggleUsb) status.usbActive = false;
   if (status.otherSideToggleUsb) {
     if (status.usbReady) status.usbActive = true;
     status.otherSideToggleUsb = false;
+    shouldSendStatus = true;
   }
   if (status.otherSideUsbActive) status.usbActive = false;
-  if (status.toggleUsb || timer_elapsed(&send_timer)) {
-    comm_sendStatus();
-    status.toggleUsb = false;
-  }
+  if (status.toggleUsb) shouldSendStatus = true;
   if (status.usbActive || status.otherSideUsbActive)
     setTimestamp(&status.lastActiveTimestamp);
   if (status.usbReady && !status.usbActive && !status.otherSideUsbActive) {
@@ -2773,7 +2773,12 @@ void synchronizeAndDecideUsbSide()
       status.usbActive = true;
     if (elapsed_ms(&status.lastActiveTimestamp, COMM_STATUS_DELAY_MS * 6))
       status.usbActive = true;
+    if (status.usbActive) shouldSendStatus = true;
   }
+  if (shouldSendStatus) {
+    comm_sendStatus();
+  }
+  status.toggleUsb = false;
 
   led_updateColor();
 }
@@ -2905,3 +2910,4 @@ int xxmain() {
     */
 }
 #endif
+
