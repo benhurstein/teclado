@@ -2030,11 +2030,11 @@ static void controller__sendUsbHex(Controller *self, uint32_t hex)
     }
   }
 }
-char compose_table[][2] = {
+char compose_table[][3] = {
   "  ", "!!", "|c", "-L", "ox", "=Y", "!^", "so", // A0  ¡¢£¤¥¦§
-  "\" ","OC", "\0", "<<", "-,", "\0", "OR", "-^", // A8 ¨©ª«¬­®¯
+  "\" ","OC", "^_a","<<", "-,", "-- ","OR", "-^", // A8 ¨©ª«¬­®¯
   "oo", "+-", "^2", "^3", "''", "mu", "P!", "^.", // B0 °±²³´µ¶·
-  ",,", "^1", "\0", ">>", "14", "12", "34", "??", // B8 ¸¹º»¼½¾¿
+  ",,", "^1", "^_o",">>", "14", "12", "34", "??", // B8 ¸¹º»¼½¾¿
   "`A", "'A", "^A", "~A", "\"A","*A", "AE", ",C", // C0 ÀÁÂÃÄÅÆÇ
   "`E", "'E", "^E", "\"E","`I", "'I", "^I", "\"I",// C8 ÈÉÊËÌÍÎÏ
   "DH", "~N", "`O", "'O", "^O", "~O", "\"O","xx", // D0 ÐÑÒÓÔÕÖ×
@@ -2066,10 +2066,10 @@ static void controller__sendUsbUnicodeChar(Controller *self, unicode uni)
     char *compose_chars = controller__composeKeycodesForUnicode(self, uni);
     usb_pressKeycode(self->usb, K_COMPOSE);
     usb_releaseKeycode(self->usb, K_COMPOSE);
-    controller__sendUsbPressAsciiChar(self, compose_chars[0]);
-    controller__sendUsbReleaseAsciiChar(self, compose_chars[0]);
-    controller__sendUsbPressAsciiChar(self, compose_chars[1]);
-    controller__sendUsbReleaseAsciiChar(self, compose_chars[1]);
+    for (int i = 0; i < 3 && compose_chars[i] != 0; i++) {
+      controller__sendUsbPressAsciiChar(self, compose_chars[i]);
+      controller__sendUsbReleaseAsciiChar(self, compose_chars[i]);
+    }
   } else {
     // send C-S-u + unicode in hex + space — this usually works in linux
     modifier_t save_modifiers = self->modifiers;
