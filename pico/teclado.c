@@ -1994,7 +1994,6 @@ static void controller__sendUsbPressAsciiChar(Controller *self, uint8_t ch)
   mod |= mk.mod;
   usb_setModifiers(self->usb, mod);
   usb_pressKeycode(self->usb, mk.key);
-  usb_setModifiers(self->usb, self->modifiers);
 }
 static void controller__sendUsbReleaseAsciiChar(Controller *self, uint8_t ch)
 {
@@ -2006,7 +2005,6 @@ static void controller__sendUsbReleaseAsciiChar(Controller *self, uint8_t ch)
   mod |= mk.mod;
   usb_setModifiers(self->usb, mod);
   usb_releaseKeycode(self->usb, mk.key);
-  usb_setModifiers(self->usb, self->modifiers);
 }
 
 static void controller__sendUsbHexNibble(Controller *self, uint8_t h)
@@ -2071,21 +2069,20 @@ static void controller__sendUsbUnicodeChar(Controller *self, unicode uni)
       controller__sendUsbReleaseAsciiChar(self, compose_chars[i]);
     }
   } else {
-    // send C-S-u + unicode in hex + space — this usually works in linux
-    modifier_t save_modifiers = self->modifiers;
+    // send C-S-u + unicode in hex + enter — this usually works in linux
     controller__setModifiers(self, RCTRL | RSHFT);
     usb_pressKeycode(self->usb, K_U);
     usb_releaseKeycode(self->usb, K_U);
     controller__setModifiers(self, 0);
     controller__sendUsbHex(self, uni);
-    controller__sendUsbPressAsciiChar(self, ' ');
-    controller__sendUsbReleaseAsciiChar(self, ' ');
-    controller__setModifiers(self, save_modifiers);
+    controller__sendUsbPressAsciiChar(self, '\n');
+    controller__sendUsbReleaseAsciiChar(self, '\n');
   }
 }
 
 static void controller__sendUtf8Str(Controller *self, char s[])
 {
+  modifier_t save_modifiers = self->modifiers;
   bool capsLocked = self->capsLocked;
   bool shifted = controller__isShifted(self);
   if (capsLocked) {
@@ -2105,7 +2102,7 @@ static void controller__sendUtf8Str(Controller *self, char s[])
     usb_pressKeycode(self->usb, K_CAPS);
     usb_releaseKeycode(self->usb, K_CAPS);
   }
-  usb_setModifiers(self->usb, self->modifiers);
+  controller__setModifiers(self, save_modifiers);
 }
 
 static uint8_t controller__sendPressAsciiChar(Controller *self, uint8_t ch)
