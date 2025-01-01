@@ -754,7 +754,7 @@ Action layer[][N_KEYS] = {
   [RAT] = {
     COM(RESET     ), NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
     MOD(GUI       ), MOD(ALT       ), MOD(CTRL      ), MOD(SHFT      ), NO_ACTION,
-    NO_ACTION,       MOD(RALT      ), LCK(FUN       ), LCK(RAT     ), NO_ACTION,
+    NO_ACTION,       MOD(RALT      ), LCK(FUN       ), LCK(RAT       ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
     KEY(K_VOLUP   ), MOU(wh_left   ), MOU(mv_up     ), MOU(wh_right  ), MOU(wh_up     ),
     KEY(K_VOLDOWN ), MOU(mv_left   ), MOU(mv_down   ), MOU(mv_right  ), MOU(wh_down   ),
@@ -1707,6 +1707,7 @@ void controller_init(Controller *self, USB *usb)
   self->baseLayer = COLEMAK;
   controller__setCurrentLayer(self, COLEMAK);
   self->lockLayer = NO_LAYER;
+  self->changeToLayer = NO_LAYER;
   /*self->waitingKeys = KeyList_create();*/
   /*self->keysBeingHeld = KeyList_create();*/
   self->holdType = noHoldType;
@@ -1826,6 +1827,7 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
       self->lockLayer = layer;
       controller__setCurrentLayer(self, layer);
       timer_disable(&self->changeLayerTimer);
+      self->changeToLayer = NO_LAYER;
     }
   }
 }
@@ -1841,6 +1843,7 @@ void controller_changeBaseLayer(Controller *self, layer_id_t layer)
     // change base layer on second tap
     self->baseLayer = layer;
     timer_disable(&self->changeLayerTimer);
+    self->changeToLayer = NO_LAYER;
   }
 }
 
