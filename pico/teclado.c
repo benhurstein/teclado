@@ -360,6 +360,7 @@ typedef enum {
   str_or_mod_action,
   key_or_layer_action,
   str_or_layer_action,
+  once_or_mod_action,
   mouse_move_action,
   mouse_button_action,
   command_action,
@@ -389,6 +390,7 @@ char *action_name[] = {
   [str_or_mod_action]     = "str_or_mod",
   [key_or_layer_action]   = "key_or_layer",
   [str_or_layer_action]   = "str_or_layer",
+  [once_or_mod_action]    = "once_or_mod",
   [mouse_move_action]     = "mouse_move",
   [mouse_button_action]   = "mouse_button",
   [command_action]        = "command",
@@ -438,6 +440,10 @@ typedef struct {
   layer_id_t layer_id;
 } str_or_layer_action_t;
 typedef struct {
+  layer_id_t layer_id;
+  modifier_t modifier;
+} layer_or_mod_action_t;
+typedef struct {
   enum {
     mv_up,
     mv_down,
@@ -469,6 +475,7 @@ struct action {
     str_or_mod_action_t str_or_mod;
     key_or_layer_action_t key_or_layer;
     str_or_layer_action_t str_or_layer;
+    layer_or_mod_action_t layer_or_mod;
     mouse_move_action_t mouse_move;
     mouse_button_action_t mouse_button;
     command_action_t command;
@@ -504,6 +511,8 @@ struct action {
 #define LCK(l)     (Action){ lock_layer_action,   .layer = { l } }
 // change base layer
 #define BAS(l)     (Action){ base_layer_action,   .layer = { l } }
+// tap=change layer for next key only, hold=send modifiers
+#define L1M(l,m)   (Action){ once_or_mod_action,  .layer_or_mod = { l, m } }
 // execute a command
 #define COM(c)     (Action){ command_action,      .command = { c } }
 // send a mouse movement
@@ -660,6 +669,7 @@ enum holdType action_holdType(Action *self)
   switch (self->action_type) {
     case key_or_mod_action:
     case str_or_mod_action:
+    case once_or_mod_action:
       return modHoldType;
     case key_or_layer_action:
     case str_or_layer_action:
@@ -697,6 +707,8 @@ Action action_tapAction(Action *self)
       return KEY(self->key_or_layer.keycode);
     case str_or_layer_action:
       return STR(self->str_or_layer.str);
+    case once_or_mod_action:
+      return LA1(self->layer_or_mod.layer_id);
     default:
       return *self;
   }
@@ -713,6 +725,8 @@ Action action_holdAction(Action *self)
       return LAH(self->key_or_layer.layer_id);
     case str_or_layer_action:
       return LAH(self->str_or_layer.layer_id);
+    case once_or_mod_action:
+      return MOD(self->layer_or_mod.modifier);
     default:
       return *self;
   }
@@ -734,7 +748,7 @@ Action layer[][N_KEYS] = {
   [ACC] = {
     ASC('\'', '`' ), ASC('"', '~'  ), STR("«"       ), STR("»"       ), STR("ª"       ),
     STR("á"       ), STR("à"       ), KEY(K_S       ), KOM(K_T,SHFT  ), KEY(K_G       ),
-    STR("â"       ), STR("ã"       ), STR("ç"       ), KEY(K_D       ), KEY(K_V       ),
+    STR("â"       ), STR("ã"       ), STR("ç"       ), STR("õ"       ), KEY(K_V       ),
     KOL(K_ESC,RAT ), KOL(K_SPC,NAV ), KOL(K_TAB,NUM ),
     STR("º"       ), STR("€"       ), STR("ú"       ), KEY(K_Y       ), KEY(K_COMPOSE ),
     KEY(K_M       ), SOM("ñ",SHFT  ), STR("é"       ), STR("í"       ), STR("ó"       ),
@@ -747,8 +761,18 @@ Action layer[][N_KEYS] = {
     KEY(K_Z       ), KOM(K_X,RALT  ), KEY(K_C       ), KEY(K_V       ), KEY(K_B       ),
     KOL(K_ESC,RAT ), KOL(K_SPC,NAV ), KOL(K_TAB,NUM ),
     KEY(K_Y       ), KEY(K_U       ), KEY(K_I       ), KEY(K_O       ), KEY(K_P       ),
-    KEY(K_H       ), KOM(K_J,SHFT  ), KOM(K_K,CTRL  ), KOM(K_L,ALT   ), KOM(K_SMCOL,GUI),
+    KEY(K_H       ), KOM(K_J,SHFT  ), KOM(K_K,CTRL  ), KOM(K_L,ALT   ), L1M(QWE_ACC,GUI),
     KEY(K_N       ), KEY(K_M       ), KEY(K_COMMA   ), KOM(K_DOT,RALT), KEY(K_SLASH   ),
+    KOL(K_ENT,NUM2), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
+  },
+  [QWE_ACC] = {
+    ASC('\'', '`' ), ASC('"', '~'  ), STR("é"       ), KEY(K_R       ), STR("ª"       ),
+    STR("á"       ), STR("à"       ), STR("ê"       ), KOM(K_F,SHFT  ), KEY(K_G       ),
+    STR("â"       ), STR("ã"       ), STR("ç"       ), STR("õ"       ), KEY(K_B       ),
+    KOL(K_ESC,RAT ), KOL(K_SPC,NAV ), KOL(K_TAB,NUM ),
+    STR("º"       ), STR("ú"       ), STR("í"       ), STR("ó"       ), STR("¶"       ),
+    KEY(K_H       ), KOM(K_J,SHFT  ), STR("é"       ), STR("ô"       ), KEY(K_COMPOSE ),
+    STR("ñ"       ), KEY(K_M       ), STR("ê"       ), STR("õ"       ), KEY(K_SLASH   ),
     KOL(K_ENT,NUM2), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
   },
   [RAT] = {
