@@ -847,8 +847,12 @@ bool layer_hasMouseMovementAction(layer_id_t layer_num)
 
 // WS2812 rgb led {{{1
 
+// from raspberry pico examples
 #define WS2812_PIN 16
 #define IS_RGBW true
+PIO led_pio;
+uint led_sm;
+uint32_t last_pixel;
 
 bool led_capsLock, led_wordLock, led_usbReady;
 
@@ -858,7 +862,22 @@ static inline void led_set_rgb(uint8_t r, uint8_t g, uint8_t b)
     ((uint32_t) (r) << 16) |
     ((uint32_t) (g) << 24) |
     ((uint32_t) (b) << 8);
-  pio_sm_put_blocking(pio0, 0, pixel_grbw);
+  if (pixel_grbw == last_pixel) return;
+  last_pixel = pixel_grbw;
+  pio_sm_put_blocking(led_pio, led_sm, pixel_grbw);
+  printf("l%x\n", pixel_grbw); // LED does not work without printing !!!
+}
+
+void led_init()
+{
+  uint offset;
+
+  bool success = pio_claim_free_sm_and_add_program_for_gpio_range(&ws2812_program, &led_pio, &led_sm, &offset, WS2812_PIN, 1, true);
+  hard_assert(success);
+
+  ws2812_program_init(led_pio, led_sm, offset, WS2812_PIN, 800000, IS_RGBW);
+
+  led_set_rgb(5, 5, 5);
 }
 
 void led_updateColor()
@@ -894,16 +913,6 @@ void setUsbSide(keyboardSide side)
 {
   status.usbActive = (side == status.mySide);
   status.otherSideUsbActive = (side == status.otherSide);
-}
-
-void led_init()
-{
-  PIO pio = pio0;
-  int sm = 0;
-  uint offset = pio_add_program(pio, &ws2812_program);
-
-  ws2812_program_init(pio, sm, offset, WS2812_PIN, 800000, IS_RGBW);
-  led_set_rgb(5, 5, 5);
 }
 
 // Keycodeq {{{1
