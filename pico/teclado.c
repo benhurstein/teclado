@@ -960,24 +960,28 @@ void keycodeq_insertData(Keycodeq *self, struct kcq_data data)
 void keycodeq_insertKeycodePress(Keycodeq *self, keycode_t keycode)
 {
   struct kcq_data data = { .command = keycodePress, .keycode = keycode };
+  log(LOG_I, "keycode queue press %x", keycode);
   keycodeq_insertData(self, data);
 }
 
 void keycodeq_insertKeycodeRelease(Keycodeq *self, keycode_t keycode)
 {
   struct kcq_data data = { .command = keycodeRelease, .keycode = keycode };
+  log(LOG_I, "keycode queue release %x", keycode);
   keycodeq_insertData(self, data);
 }
 
 void keycodeq_insertModifierPress(Keycodeq *self, modifier_t modifier)
 {
   struct kcq_data data = { .command = modifierPress, .modifier = modifier };
+  log(LOG_I, "keycode queue mod press %x", modifier);
   keycodeq_insertData(self, data);
 }
 
 void keycodeq_insertModifierRelease(Keycodeq *self, modifier_t modifier)
 {
   struct kcq_data data = { .command = modifierRelease, .modifier = modifier };
+  log(LOG_I, "keycode queue mod release %x", modifier);
   keycodeq_insertData(self, data);
 }
 
