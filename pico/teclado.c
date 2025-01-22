@@ -125,7 +125,10 @@ bool timer_is_enabled(Timer *t)
 
 bool timer_elapsed(Timer *t)
 {
-  return t->enabled && (status.now - t->timestamp) > t->delay;
+  if (!timer_is_enabled(t)) return false;
+  if ((status.now - t->timestamp) <= t->delay) return false;
+  timer_disable(t);
+  return true;
 }
 
 // types {{{1
