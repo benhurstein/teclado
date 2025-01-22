@@ -1892,27 +1892,38 @@ layer_id_t controller_baseLayer(Controller *self)
   return self->baseLayer;
 }
 
-static void controller__pressKey(Controller *self, Key *key)
+static void controller__tapKey(Controller *self, Key *key)
 {
   Action action = layer[self->currentLayer][key_id(key)];
   if (action_isMouseMovementAction(&action)) {
     log(LOG_T, "ignoring mouse movement key press");
     return;
   }
-  log(LOG_T, "pressKey %s %s", key_description(key), action_description(&action));
+  log(LOG_T, "tapKey %s %s", key_description(key), action_description(&action));
   key_setReleaseAction(key, Action_noAction()); // just in case...
-  if (key_side(key) == self->holdSide) {
-    if (action_isTypingAction(&action)) {
-      log(LOG_T, "ignoring typing key on same side of held key");
-      return;
-    }
-    keyList_insertKey(&self->keysBeingHeld, key);
-    action = action_holdAction(&action);
-    log(LOG_T, "hold: %s", action_description(&action));
-  } else {
-    action = action_tapAction(&action);
-    log(LOG_T, "tap: %s", action_description(&action));
+  action = action_tapAction(&action);
+  log(LOG_T, "tap: %s", action_description(&action));
+  action_actuate(&action, key, self);
+}
+
+static void controller__holdKey(Controller *self, Key *key)
+{
+  Action action = layer[self->currentLayer][key_id(key)];
+  if (action_holdType(&action) == noHoldType) {
+    return controller__tapKey(self, key);
   }
+  keyboardSide keySide = key_side(key);
+  if (self->holdSide == noSide) self->holdSide = keySide;
+  // keys can only be held in one side
+  if (keySide != self->holdSide) {
+    return controller__tapKey(self, key);
+  }
+
+  log(LOG_T, "holdKey %s %s", key_description(key), action_description(&action));
+  key_setReleaseAction(key, Action_noAction()); // just in case...
+  keyList_insertKey(&self->keysBeingHeld, key);
+  action = action_holdAction(&action);
+  log(LOG_T, "hold: %s", action_description(&action));
   action_actuate(&action, key, self);
 }
 
@@ -1924,6 +1935,8 @@ static void controller__releaseKey(Controller *self, Key *key)
     keyList_removeKey(&self->keysBeingHeld, key);
     if (keyList_empty(&self->keysBeingHeld)) {
       self->holdSide = noSide;
+    } else {
+      self->holdSide = key_side(keyList_firstKey(&self->keysBeingHeld));
     }
   }
   action_actuate(action, key, self);
@@ -1946,7 +1959,7 @@ void controller_keyPressed(Controller *self, Key *key)
     Action *action = &layer[self->currentLayer][key_id(key)];
     if (action_holdType(action) == noHoldType) {
       log(LOG_T, " press action: %s", action_description(action));
-      controller__pressKey(self, key);
+      controller__tapKey(self, key);
     } else {
       log(LOG_T, "key wait 1");
       keyList_insertKey(&self->waitingKeys, key);
@@ -1959,25 +1972,20 @@ void controller_keyPressed(Controller *self, Key *key)
   }
 }
 
-void controller_holdWaitingKeysUntilKey(Controller *self, Key *lastKey)
+void controller_holdWaitingKeysBeforeKey(Controller *self, Key *lastKey)
 {
-  if (keyList_empty(&self->waitingKeys)) return;
-  self->holdSide = key_side(keyList_firstKey(&self->waitingKeys));
   while (!keyList_empty(&self->waitingKeys)) {
+    if (keyList_firstKey(&self->waitingKeys) == lastKey) break;
     Key *key = keyList_removeFirstKey(&self->waitingKeys);
-    controller__pressKey(self, key);
-    if (key == lastKey) {
-      break;
-    }
+    controller__holdKey(self, key);
   }
 }
 
 void controller_tapWaitingKeysUntilKey(Controller *self, Key *lastKey)
 {
-  if (keyList_empty(&self->waitingKeys)) return;
   while (!keyList_empty(&self->waitingKeys)) {
     Key *key = keyList_removeFirstKey(&self->waitingKeys);
-    controller__pressKey(self, key);
+    controller__tapKey(self, key);
     if (key == lastKey) {
       break;
     }
@@ -1990,14 +1998,26 @@ void controller_keyReleased(Controller *self, Key *key)
   self->delayedReleaseAction = Action_noAction();
   log(LOG_T, "keyReleased: %s", key_description(key));
   if (keyList_containsKey(&self->waitingKeys, key)) {
+    bool its_a_tap = false;
     log(LOG_T, " was waiting");
     Key *firstKey = keyList_firstKey(&self->waitingKeys);
-    if (firstKey == key || key_side(firstKey) == key_side(key)) { // it's a tap
+    if (firstKey == key) {
+      its_a_tap = true;
+    } else {
+      // do not hold a modifier for a key in it's same side
+      Action *firstKeyAction = &layer[self->currentLayer][key_id(firstKey)];
+      if (action_holdType(firstKeyAction) == modHoldType
+        && key_side(firstKey) == key_side(key)) {
+        its_a_tap = true;
+      }
+    }
+    if (its_a_tap) {
       log(LOG_T, " it's a tap (%s)", key_description(key));
       controller_tapWaitingKeysUntilKey(self, key);
     } else { // it's a hold
       log(LOG_T, " it's a hold (%s, first %s)", key_description(key), key_description(firstKey));
-      controller_holdWaitingKeysUntilKey(self, key);
+      controller_holdWaitingKeysBeforeKey(self, key);
+      controller_tapWaitingKeysUntilKey(self, key);
     }
     controller__resetWaitingKeyTimeout(self);
   }
@@ -2153,7 +2173,6 @@ static uint8_t controller__sendPressAsciiChar(Controller *self, uint8_t ch)
   if (self->wordLocked && !uni_in_word(ch)) controller__setWordLock(self, false);
   if (self->wordLocked) ch = unicode_to_upper(ch);
   controller__sendUsbPressAsciiChar(self, ch);
-  usb_setModifiers(self->usb, self->modifiers);
   return ch;
 }
 
@@ -2278,7 +2297,7 @@ void controller_task(Controller *self)
   }
   if (timer_elapsed(&self->waitingKeyTimer)) {
     log(LOG_T, "hold timeout");
-    controller_holdWaitingKeysUntilKey(self, NULL);
+    controller_holdWaitingKeysBeforeKey(self, NULL);
   }
 }
 
