@@ -317,16 +317,16 @@ enum holdType action_holdType(Action *self);
 
 // log {{{1
 
-#define LOG_E 0b00000001
-#define LOG_I 0b00000010
-#define LOG_R 0b00000100
-#define LOG_U 0b00001000
-#define LOG_C 0b00010000
-#define LOG_T 0b00100000
+#define LOG_E 0b00000001 // internal error
+#define LOG_I 0b00000010 // keycode queue
+#define LOG_R 0b00000100 // usb key report
+#define LOG_U 0b00001000 // usb mouse report
+#define LOG_C 0b00010000 // communication errors
+#define LOG_T 0b00100000 // controller
 #define LOG_K 0b01000000
-#define LOG_L 0b10000000
+#define LOG_L 0b10000000 // periodically log key state
 
-uint8_t log_level = LOG_L | LOG_R | LOG_C;
+uint8_t log_level = LOG_L | LOG_C;
 
 void log_set_level(uint8_t new_level)
 {
