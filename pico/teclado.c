@@ -2816,8 +2816,6 @@ void synchronizeAndDecideUsbSide()
     comm_sendStatus();
   }
   status.toggleUsb = false;
-
-  led_updateColor();
 }
 
 
@@ -2852,6 +2850,7 @@ int main()
     log_keys(status.mySide, localReader.hw_version);
     usb_task(&usb);
     synchronizeAndDecideUsbSide();
+    led_updateColor();
   }
 }
 #if 0
