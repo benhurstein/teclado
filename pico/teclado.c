@@ -1715,7 +1715,6 @@ struct controller {
   Key *waitingKeys;
   Key *keysBeingHeld;
   Timer waitingKeyTimer;
-  enum holdType holdType;
   keyboardSide holdSide;
   Timer moveMouseTimer;
   int16_t mousePos_v;
@@ -1750,7 +1749,6 @@ void controller_init(Controller *self, USB *usb)
   self->changeToLayer = NO_LAYER;
   /*self->waitingKeys = KeyList_create();*/
   /*self->keysBeingHeld = KeyList_create();*/
-  self->holdType = noHoldType;
   self->holdSide = noSide;
   timer_disable(&self->moveMouseTimer);
   self->delayedReleaseAction = Action_noAction();
