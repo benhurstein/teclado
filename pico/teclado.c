@@ -1362,8 +1362,7 @@ struct key {
       int8_t maxVal;
     } /*analog*/;
     struct {
-      bool lastDigitalValue;
-      bool rawDigitalValue;
+      bool digitalValue;
       bool ignoreNewValues;
       Timer debounceTimer;
     } /*digital*/;
@@ -1570,12 +1569,11 @@ void key_setNewAnalogRaw(Key *self, uint16_t newRaw)
 
 void key_setNewDigitalRaw(Key *self, bool newRaw)
 {
-  self->rawDigitalValue = newRaw;
   if (self->ignoreNewValues && timer_elapsed(&self->debounceTimer))
     self->ignoreNewValues = false;
   if (self->ignoreNewValues) return;
-  if (newRaw == self->lastDigitalValue) return;
-  self->lastDigitalValue = newRaw;
+  if (newRaw == self->digitalValue) return;
+  self->digitalValue = newRaw;
   timer_enable_ms(&self->debounceTimer, DEBOUNCING_DELAY_MS);
   self->ignoreNewValues = true;
   key_setVal(self, newRaw ? 9 : 0);
@@ -1729,6 +1727,13 @@ struct controller {
   Timer changeLayerTimer;
 } *controller_singleton;
 
+static void controller__setBaseLayer(Controller *self, layer_id_t layer_id)
+{
+  self->baseLayer = layer_id;
+  timer_disable(&self->changeLayerTimer);
+  self->changeToLayer = NO_LAYER;
+}
+
 static void controller__setCurrentLayer(Controller *self, layer_id_t layer_id)
 {
   self->currentLayer = layer_id;
@@ -1737,20 +1742,21 @@ static void controller__setCurrentLayer(Controller *self, layer_id_t layer_id)
   } else {
     timer_disable(&self->moveMouseTimer);
   }
+  timer_disable(&self->changeLayerTimer);
+  self->changeToLayer = NO_LAYER;
 }
+
 void controller_init(Controller *self, USB *usb)
 {
   controller_singleton = self;
   memset(self, 0, sizeof(*self));
   self->usb = usb;
-  self->baseLayer = COLEMAK;
-  controller__setCurrentLayer(self, COLEMAK);
+  controller__setBaseLayer(self, COLEMAK);
+  controller__setCurrentLayer(self, self->baseLayer);
   self->lockLayer = NO_LAYER;
-  self->changeToLayer = NO_LAYER;
-  /*self->waitingKeys = KeyList_create();*/
-  /*self->keysBeingHeld = KeyList_create();*/
+  self->waitingKeys = NULL;
+  self->keysBeingHeld = NULL;
   self->holdSide = noSide;
-  timer_disable(&self->moveMouseTimer);
   self->delayedReleaseAction = Action_noAction();
   self->modifiers = 0;
   self->wordLocked = false;
@@ -1864,8 +1870,6 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
       // lock on second tap
       self->lockLayer = layer;
       controller__setCurrentLayer(self, layer);
-      timer_disable(&self->changeLayerTimer);
-      self->changeToLayer = NO_LAYER;
     }
   }
 }
@@ -1879,9 +1883,7 @@ void controller_changeBaseLayer(Controller *self, layer_id_t layer)
     timer_enable_ms(&self->changeLayerTimer, LOCK_DELAY_MS);
   } else {
     // change base layer on second tap
-    self->baseLayer = layer;
-    timer_disable(&self->changeLayerTimer);
-    self->changeToLayer = NO_LAYER;
+    controller__setBaseLayer(self, layer);
   }
 }
 
@@ -2282,14 +2284,16 @@ void controller_doCommand(Controller *self, int command)
   printf("Layers: current=%d base=%d\n", self->currentLayer, self->baseLayer);
   printf("waiting: "); keyList_print(&self->waitingKeys);
   printf("being held: "); keyList_print(&self->keysBeingHeld);
-  self->baseLayer = COLEMAK;
-  controller__setCurrentLayer(self, COLEMAK);
+  controller__setBaseLayer(self, COLEMAK);
+  controller__setCurrentLayer(self, self->baseLayer);
 }
 
 void controller_task(Controller *self)
 {
   Key_processKeyChanges();
-  if (timer_elapsed(&self->changeLayerTimer)) self->changeToLayer = NO_LAYER;
+  if (timer_elapsed(&self->changeLayerTimer)) {
+    self->changeToLayer = NO_LAYER;
+  }
   if (timer_elapsed(&self->moveMouseTimer)) {
     controller__timedMoveMouse(self);
   }
@@ -2758,7 +2762,7 @@ void log_keys(keyboardSide side, int version)
       if (version == 2 || version ==  3) {
         printf("%d|%d\n", v1, v2);
         for (int i = firstKeyId; i <= lastKeyId; i++) {
-          printf("%5u", keys[i].rawDigitalValue);
+          printf("%5u", keys[i].digitalValue);
         }
       } else if (version == 0 || version == 1) {
         printf("\n");
