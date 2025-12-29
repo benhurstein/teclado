@@ -990,15 +990,20 @@ void keycodeq_insertModifierRelease(Keycodeq *self, modifier_t modifier)
   keycodeq_insertData(self, data);
 }
 
-enum command keycodeq_head(Keycodeq *self)
+bool keycodeq_is_empty(Keycodeq *self)
 {
-  if (self->count == 0) return none;
+  return (self->count == 0);
+}
+
+enum command keycodeq_next_command(Keycodeq *self)
+{
+  if (keycodeq_is_empty(self)) return none;
   return self->data[self->first].command;
 }
 
 keycode_t keycodeq_removeKeycode(Keycodeq *self)
 {
-  if (self->count == 0) return 0;
+  if (keycodeq_is_empty(self)) return 0;
   keycode_t keycode = self->data[self->first].keycode;
   self->first = (self->first + 1) % KCQ_N;
   self->count--;
@@ -1006,7 +1011,7 @@ keycode_t keycodeq_removeKeycode(Keycodeq *self)
 }
 modifier_t keycodeq_removeModifier(Keycodeq *self)
 {
-  if (self->count == 0) return 0;
+  if (keycodeq_is_empty(self)) return 0;
   modifier_t modifier = self->data[self->first].modifier;
   self->first = (self->first + 1) % KCQ_N;
   self->count--;
@@ -1147,21 +1152,21 @@ void usb__insertKeycode(USB *self, keycode_t keycode)
 
 void usb__sendKeycodePresses(USB *self)
 {
-  while (keycodeq_head(&self->keycodeq) == keycodePress) {
+  while (keycodeq_next_command(&self->keycodeq) == keycodePress) {
     usb__insertKeycode(self, keycodeq_removeKeycode(&self->keycodeq));
   }
   usb_sendKeyboardReport(self);
 }
 void usb__sendModifierPresses(USB *self)
 {
-  while (keycodeq_head(&self->keycodeq) == modifierPress) {
+  while (keycodeq_next_command(&self->keycodeq) == modifierPress) {
     self->sent_modifiers |= keycodeq_removeModifier(&self->keycodeq);
   }
   usb_sendKeyboardReport(self);
 }
 void usb__sendKeycodeReleases(USB *self)
 {
-  while (keycodeq_head(&self->keycodeq) == keycodeRelease) {
+  while (keycodeq_next_command(&self->keycodeq) == keycodeRelease) {
     usb__removeKeycode(self, keycodeq_removeKeycode(&self->keycodeq));
     break;
   }
@@ -1169,8 +1174,7 @@ void usb__sendKeycodeReleases(USB *self)
 }
 void usb__sendModifierReleases(USB *self)
 {
-  enum command cmd = keycodeq_head(&self->keycodeq);
-  while (keycodeq_head(&self->keycodeq) == modifierRelease) {
+  while (keycodeq_next_command(&self->keycodeq) == modifierRelease) {
     self->sent_modifiers &= ~keycodeq_removeModifier(&self->keycodeq);
     break;
   }
@@ -1182,10 +1186,10 @@ void usb_task(USB *self)
   tud_task();
   status.usbReady = tud_ready();
   if (!status.usbActive) return;
-  if (keycodeq_head(&self->keycodeq) == none) return;
+  if (keycodeq_is_empty(&self->keycodeq)) return;
   if (tud_suspended()) tud_remote_wakeup();
   if (!tud_hid_ready()) return;
-  switch (keycodeq_head(&self->keycodeq)) {
+  switch (keycodeq_next_command(&self->keycodeq)) {
     case none:
       break;
     case keycodePress:
