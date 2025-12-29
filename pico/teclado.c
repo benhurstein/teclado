@@ -25,7 +25,7 @@
 // time to wait for second key press to lock a layer
 #define LOCK_DELAY_MS 200u
 // ignore changes in digital key during this time to debounce it
-#define DEBOUNCING_DELAY_MS 20u
+#define DEBOUNCING_DELAY_MS 25u
 // period to send kb status to other side
 #define COMM_STATUS_DELAY_MS 20u
 
@@ -211,13 +211,16 @@ typedef enum {
 } button_t;
 
 // ascii to mod-key {{{1
+
+// table with (possibly shifted) key to type in order to obtain each ASCII char
+//   the following table is for US keyboard layout
+//   must be changed if OS is configured for a different layout
+
 typedef struct {
   modifier_t mod;
   keycode_t key;
 } mod_key;
 const mod_key ascii_to_mod_key[] = {
-  // table for US keyboard layout
-  // must change if OS is configured for a different layout
 #define S SHFT
   [0x00] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
   [0x04] = {0,0        }, {0,0       }, {0,0       }, {0,0       },
@@ -292,7 +295,6 @@ void controller_setDelayedReleaseAction(Controller *self, Action action);
 void controller_doCommand(Controller *self, int command);
 void controller_keyPressed(Controller *self, Key *key);
 void controller_keyReleased(Controller *self, Key *key);
-
 
 Key *Key_keyWithId(uint8_t keyId);
 void key_init(Key *self, Controller *controller, uint8_t keyId);
