@@ -1598,25 +1598,31 @@ void key_setNewDigitalRaw(Key *self, bool newRaw)
 // KeyList {{{1
 // A key can be at most in one controller list.
 // a keylist is implemented as a linked list, using the "next" field in Key
-Key *keyList_removeFirstKey(Key **list)
+
+typedef Key *KeyList;
+
+Key *keyList_removeFirstKey(KeyList *list)
 {
+  if (list == NULL) return NULL;
   Key *key = *list;
   if (key != NULL) *list = key->next;
   return key;
 }
 
-Key *keyList_firstKey(Key **list)
+Key *keyList_firstKey(KeyList *list)
 {
+  if (list == NULL) return NULL;
   return *list;
 }
 
-bool keyList_empty(Key **list)
+bool keyList_empty(KeyList *list)
 {
-  return *list == NULL;
+  return list == NULL || *list == NULL;
 }
 
-void keyList_insertKey(Key **list, Key *key)
+void keyList_insertKey(KeyList *list, Key *key)
 {
+  if (list == NULL || key == NULL) return;
   key->next = NULL;
   if (*list == NULL) {
     *list = key;
@@ -1629,9 +1635,9 @@ void keyList_insertKey(Key **list, Key *key)
   previous->next = key;
 }
 
-void keyList_removeKey(Key **list, Key *key)
+void keyList_removeKey(KeyList *list, Key *key)
 {
-  if (*list == NULL) return;
+  if (list == NULL || *list == NULL || key == NULL) return;
   if (*list == key) {
     *list = (*list)->next;
     return;
@@ -1646,16 +1652,18 @@ void keyList_removeKey(Key **list, Key *key)
   }
 }
 
-bool keyList_containsKey(Key **list, Key *searchedKey)
+bool keyList_containsKey(KeyList *list, Key *searchedKey)
 {
+  if (list == NULL || *list == NULL || searchedKey == NULL) return false;
   for (Key *key = *list; key != NULL; key = key->next) {
     if (key == searchedKey) return true;
   }
   return false;
 }
 
-void keyList_print(Key **list)
+void keyList_print(KeyList *list)
 {
+  if (list == NULL) return;
   printf("[");
   for (Key *key = *list; key != NULL; key = key->next) {
     printf("%s ", key_description(key));
@@ -1726,8 +1734,8 @@ struct controller {
   layer_id_t baseLayer;
   layer_id_t lockLayer;
   USB *usb;
-  Key *waitingKeys;
-  Key *keysBeingHeld;
+  KeyList waitingKeys;
+  KeyList keysBeingHeld;
   Timer waitingKeyTimer;
   keyboardSide holdSide;
   Timer moveMouseTimer;
