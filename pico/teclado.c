@@ -489,15 +489,15 @@ struct action {
 
 // key actions
 // do nothing
-#define NO_ACTION  (Action){ no_action }
+#define NO_ACTION  (Action){ no_action,           .key = { K_NONE } }
 // send a keycode
-#define KEY(k)     (Action){ key_action,          .key = k }
+#define KEY(k)     (Action){ key_action,          .key = { k } }
 // send the keycode corresponding to ascii char (different if shifted)
 #define ASC(u,s)   (Action){ asc_action,          .asc = { u, s } }
 // send sequence of keycodes to type utf8 string
 #define STR(s)     (Action){ str_action,          .str = { s } }
 // send modifiers
-#define MOD(m)     (Action){ mod_action,          .mod = m }
+#define MOD(m)     (Action){ mod_action,          .mod = { m } }
 // tap=send keycode; hold=send modifiers
 #define KOM(k,m)   (Action){ key_or_mod_action,   .key_or_mod = { k, m } }
 // tap=send utf8 string; hold=send modifiers
@@ -526,15 +526,15 @@ struct action {
 #define BUT(b)     (Action){ mouse_button_action, .mouse_button = { b } }
 // auxiliary actions, associated to the release of a key
 // release a keycode
-#define REK(k)     (Action){ rel_key_action,      .key = k }
+#define REK(k)     (Action){ rel_key_action,      .key = { k } }
 // release the keycode corresponding to the ascii char
-#define REA(c)     (Action){ rel_asc_action,      .rea = c }
+#define REA(c)     (Action){ rel_asc_action,      .rea = { c } }
 // release a modifier
-#define REM(m)     (Action){ rel_mod_action,      .mod = m }
+#define REM(m)     (Action){ rel_mod_action,      .mod = { m } }
 // release a layer (go back do base layer)
-#define REL()      (Action){ rel_layer_action }
+#define REL()      (Action){ rel_layer_action,    .key = { K_NONE } }
 // release the "one key" layer (go back to the layer it was before)
-#define REO()      (Action){ rel_once_layer_action }
+#define REO()      (Action){ rel_once_layer_action,.key = { K_NONE } }
 // release mouse button
 #define REB(b)     (Action){ rel_button_action,   .mouse_button = { b } }
 
