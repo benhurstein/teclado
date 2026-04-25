@@ -547,6 +547,7 @@ char *action_description(Action *a)
 }
 
 void no_actuate(Action *self, Key *key, Controller *controller) {
+  (void)self, (void)key, (void)controller;
 }
 // actuate on key press
 void key_actuate(Action *self, Key *key, Controller *controller) {
@@ -615,21 +616,29 @@ void command_actuate(Action *self, Key *key, Controller *controller) {
 
 // actuate on key release
 void rel_key_actuate(Action *self, Key *key, Controller *controller) {
+  (void)key;
   controller_releaseKeycode(controller, self->key.keycode);
 }
 void rel_asc_actuate(Action *self, Key *key, Controller *controller) {
+  (void)key;
   controller_releaseAscii(controller, self->rea.pressed);
 }
 void rel_mod_actuate(Action *self, Key *key, Controller *controller) {
+  (void)key;
   controller_releaseModifier(controller, self->mod.modifier);
 }
 void rel_layer_actuate(Action *self, Key *key, Controller *controller) {
+  (void)self;
+  (void)key;
   controller_changeLayer(controller, controller_baseLayer(controller));
 }
 void rel_once_layer_actuate(Action *self, Key *key, Controller *controller) {
+  (void)self;
+  (void)key;
   controller_setDelayedReleaseAction(controller, REL());
 }
 void rel_button_actuate(Action *self, Key *key, Controller *controller) {
+  (void)key;
   controller_releaseMouseButton(controller, self->mouse_button.button);
 }
 
