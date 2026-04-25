@@ -2,3 +2,4 @@ build
 generated
 cmake_install.cmake
 .cache
+.clangd
