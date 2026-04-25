@@ -2097,7 +2097,9 @@ static void controller__sendUsbHex(Controller *self, uint32_t hex)
     }
   }
 }
-char compose_table[][3] = {
+// sequence of caracters to send after "compose" key to code
+// some unicode chars
+char compose_table[][3] __attribute__((nonstring)) = {
   "  ", "!!", "|c", "-L", "ox", "=Y", "!^", "so", // A0  ¡¢£¤¥¦§
   "\" ","OC", "^_a","<<", "-,", "-- ","OR", "-^", // A8 ¨©ª«¬­®¯
   "oo", "+-", "^2", "^3", "''", "mu", "P!", "^.", // B0 °±²³´µ¶·
@@ -2111,42 +2113,46 @@ char compose_table[][3] = {
   "dh", "~n", "`o", "'o", "^o", "~o", "\"o",":-", // F0 ðñòóôõö÷
   "/o", "`u", "'u", "^u", "\"u","'y", "th", "\"y",// F8 øùúûüýþÿ
 };
-static bool controller__hasComposeKeycodesForUnicode(Controller *self, unicode uni)
+static bool controller__sendUsbUnicodeCharAsAscii(Controller *self, unicode uni)
 {
-  if (uni < 0xA0 || uni > 0xFF) return false;
-  int i = uni - 0xA0;
-  if (compose_table[i][0] == '\0') return false;
+  if (uni >= 128) return false;
+  uint8_t ascii = uni;
+  controller__sendUsbPressAsciiChar(self, ascii);
+  controller__sendUsbReleaseAsciiChar(self, ascii);
   return true;
 }
-static char *controller__composeKeycodesForUnicode(Controller *self, unicode uni)
+static bool controller__sendUsbUnicodeCharAsCompose(Controller *self, unicode uni)
 {
-  if (uni < 0xA0 || uni > 0xFF) return NULL;
-  int i = uni - 0xA0;
-  return compose_table[i];
+  if (uni < 0xA0 || uni > 0xFF) return false;
+  char *compose_chars = compose_table[uni - 0xA0];
+  if (compose_chars[0] == '\0') return false;
+
+  usb_pressKeycode(self->usb, K_COMPOSE);
+  usb_releaseKeycode(self->usb, K_COMPOSE);
+  for (int i = 0; i < 3 && compose_chars[i] != '\0'; i++) {
+    controller__sendUsbPressAsciiChar(self, compose_chars[i]);
+    controller__sendUsbReleaseAsciiChar(self, compose_chars[i]);
+  }
+  return true;
+}
+static bool controller__sendUsbUnicodeCharAsCode(Controller *self, unicode uni)
+{
+  // send C-S-u + unicode in hex + enter
+  // — this usually works in linux (depends on input method and application)
+  controller__setModifiers(self, RCTRL | RSHFT);
+  usb_pressKeycode(self->usb, K_U);
+  usb_releaseKeycode(self->usb, K_U);
+  controller__setModifiers(self, 0);
+  controller__sendUsbHex(self, uni);
+  controller__sendUsbPressAsciiChar(self, '\n');
+  controller__sendUsbReleaseAsciiChar(self, '\n');
+  return true;
 }
 static void controller__sendUsbUnicodeChar(Controller *self, unicode uni)
 {
-  if (uni < 128) {
-    controller__sendUsbPressAsciiChar(self, uni);
-    controller__sendUsbReleaseAsciiChar(self, uni);
-  } else if (controller__hasComposeKeycodesForUnicode(self, uni)) {
-    char *compose_chars = controller__composeKeycodesForUnicode(self, uni);
-    usb_pressKeycode(self->usb, K_COMPOSE);
-    usb_releaseKeycode(self->usb, K_COMPOSE);
-    for (int i = 0; i < 3 && compose_chars[i] != 0; i++) {
-      controller__sendUsbPressAsciiChar(self, compose_chars[i]);
-      controller__sendUsbReleaseAsciiChar(self, compose_chars[i]);
-    }
-  } else {
-    // send C-S-u + unicode in hex + enter — this usually works in linux
-    controller__setModifiers(self, RCTRL | RSHFT);
-    usb_pressKeycode(self->usb, K_U);
-    usb_releaseKeycode(self->usb, K_U);
-    controller__setModifiers(self, 0);
-    controller__sendUsbHex(self, uni);
-    controller__sendUsbPressAsciiChar(self, '\n');
-    controller__sendUsbReleaseAsciiChar(self, '\n');
-  }
+  if (controller__sendUsbUnicodeCharAsAscii(self, uni)) return;
+  if (controller__sendUsbUnicodeCharAsCompose(self, uni)) return;
+  if (controller__sendUsbUnicodeCharAsCode(self, uni)) return;
 }
 
 static void controller__sendUtf8Str(Controller *self, char s[])
