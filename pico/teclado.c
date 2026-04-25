@@ -2343,18 +2343,6 @@ void localReader__initDigitalGPIO(LocalReader *self)
   }
 }
 
-static uint16_t readPin(uint sel, uint ana)
-{
-  adc_select_input(ana);
-  gpio_init(sel);
-  gpio_set_dir(sel, GPIO_OUT);
-  gpio_put(sel, 1);
-  uint16_t raw = adc_read();
-  gpio_put(sel, 0);
-  sleep_us(250);
-  return raw;
-}
-
 int v1, v2;
 static bool detect_resistor(uint8_t pin1, uint8_t pin2)
 {
