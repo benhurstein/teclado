@@ -934,7 +934,7 @@ void setUsbSide(keyboardSide side)
 #define KCQ_N 200
 typedef struct {
   struct kcq_data {
-    enum command {
+    enum command : uint8_t {
       none,
       keycodePress,
       keycodeRelease,
@@ -1111,6 +1111,7 @@ void usb_sendKeyboardReport(USB *self)
 
 void usb_sendMouseReport(USB *self, uint8_t buttons, int8_t v, int8_t h, int8_t wv, int8_t wh)
 {
+  (void)self;
   // buttons, x, y, scroll, pan
   if (status.usbActive) {
     log(LOG_U, "usb mouse: B%x ^%d >%d %d %d", buttons, v, h, wv, wh);
