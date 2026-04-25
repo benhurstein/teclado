@@ -2448,7 +2448,7 @@ void localReader_discoverTypeSideAndVersion(LocalReader *self)
   }
 }
 
-void localReader_init(LocalReader *self, Controller *controller)
+void localReader_init(LocalReader *self)
 {
   localReader_discoverTypeSideAndVersion(self);
   if (self->side == noSide) return;
@@ -2861,7 +2861,7 @@ int main()
   controller_init(&controller, &usb);
   Key_init(&controller);
 
-  localReader_init(&localReader, &controller);
+  localReader_init(&localReader);
   status.mySide = localReader_keyboardSide(&localReader);
   if (status.mySide == noSide) fatal("Cannot determine keyboard side");
   status.otherSide = (status.mySide == leftSide) ? rightSide : leftSide;
