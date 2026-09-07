@@ -58,43 +58,15 @@ int8_t leftDigitalHwIdToSwId[N_DIGITAL_HWKKEYS] = {
   -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,  3,  1,  2,  4, -1, -1,
 };
 
-// status {{{1
-typedef enum { noSide, leftSide, rightSide } keyboardSide;
-typedef enum { analog, digital } keyboardType;
-struct {
-  keyboardSide mySide;
-  bool usbReady;
-  bool usbActive;
-  bool toggleUsb;
-  keyboardSide otherSide;
-  bool otherSideUsbReady;
-  bool otherSideUsbActive;
-  bool otherSideToggleUsb;
-  uint32_t now;
-  bool commOK;
-  uint32_t lastActiveTimestamp;
-} status;
-
-void update_now() {
-  status.now = time_us_32();
-  if (status.now == 0) status.now = 1;
-}
-
-void setTimestamp(uint32_t *timestamp) {
-  *timestamp = status.now;
-}
-
-static inline bool elapsed_µs(uint32_t *timestamp, uint32_t delay_µs) {
-  if (*timestamp == 0) return false;
-  if ((status.now - *timestamp) < delay_µs) return false;
-  *timestamp = 0;
-  return true;
-}
-static inline bool elapsed_ms(uint32_t *timestamp, uint32_t delay_ms) {
-  return elapsed_µs(timestamp, delay_ms * 1000);
-}
-
 // timer {{{1
+
+uint32_t Timer_now;
+
+void Timer_set_now() {
+  Timer_now = time_us_32();
+  if (Timer_now == 0) Timer_now = 1;
+}
+
 typedef struct {
   uint32_t timestamp;
   uint32_t delay;
@@ -103,9 +75,14 @@ typedef struct {
 
 static void timer_enable_µs(Timer *t, uint32_t delay_µs)
 {
-  t->timestamp = status.now;
+  t->timestamp = Timer_now;
   t->delay = delay_µs;
   t->enabled = true;
+}
+
+static uint32_t timer_elapsed_µs(Timer *t)
+{
+  return Timer_now - t->timestamp;
 }
 
 static void timer_enable_ms(Timer *t, uint32_t delay_ms)
@@ -123,13 +100,34 @@ bool timer_is_enabled(Timer *t)
   return t->enabled;
 }
 
-bool timer_elapsed(Timer *t)
+static uint32_t timer_elapsed_ms(Timer *t)
+{
+  return timer_elapsed_µs(t) / 1000;
+}
+
+bool timer_expired(Timer *t)
 {
   if (!timer_is_enabled(t)) return false;
-  if ((status.now - t->timestamp) <= t->delay) return false;
+  if (timer_elapsed_µs(t) <= t->delay) return false;
   timer_disable(t);
   return true;
 }
+
+// status {{{1
+typedef enum { noSide, leftSide, rightSide } keyboardSide;
+typedef enum { analog, digital } keyboardType;
+struct {
+  keyboardSide mySide;
+  bool usbReady;
+  bool usbActive;
+  bool toggleUsb;
+  keyboardSide otherSide;
+  bool otherSideUsbReady;
+  bool otherSideUsbActive;
+  bool otherSideToggleUsb;
+  bool commOK;
+  Timer usbInactiveTimer;
+} status;
 
 // types {{{1
 typedef enum {
@@ -1342,7 +1340,7 @@ void comm_task()
       log(LOG_C, "Err comm3 invalid id: [%02hhx %02hhx] %d/%d", msgId, msgVal, comm_error_count, comm_received_message_count);
     }
   }
-  if (status.commOK && timer_elapsed(&recv_timer))
+  if (status.commOK && timer_expired(&recv_timer))
     status.commOK = false;
 }
 
@@ -1585,7 +1583,7 @@ void key_setNewAnalogRaw(Key *self, uint16_t newRaw)
 
 void key_setNewDigitalRaw(Key *self, bool newRaw)
 {
-  if (self->ignoreNewValues && timer_elapsed(&self->debounceTimer))
+  if (self->ignoreNewValues && timer_expired(&self->debounceTimer))
     self->ignoreNewValues = false;
   if (self->ignoreNewValues) return;
   if (newRaw == self->digitalValue) return;
@@ -2321,13 +2319,13 @@ void controller_doCommand(Controller *self, int command)
 void controller_task(Controller *self)
 {
   Key_processKeyChanges();
-  if (timer_elapsed(&self->changeLayerTimer)) {
+  if (timer_expired(&self->changeLayerTimer)) {
     self->changeToLayer = NO_LAYER;
   }
-  if (timer_elapsed(&self->moveMouseTimer)) {
+  if (timer_expired(&self->moveMouseTimer)) {
     controller__timedMoveMouse(self);
   }
-  if (timer_elapsed(&self->waitingKeyTimer)) {
+  if (timer_expired(&self->waitingKeyTimer)) {
     log(LOG_T, "hold timeout");
     controller_holdWaitingKeysBeforeKey(self, NULL);
   }
@@ -2769,7 +2767,7 @@ void log_keys(keyboardSide side, int version)
       lastKeyId = 35;
     }
     ct++;
-    if (timer_elapsed(&timer)) {
+    if (timer_expired(&timer)) {
       timer_enable_ms(&timer, 1000);
       printf("%s ", status.mySide == leftSide ? "LEFT" : "RIGHT");
       printf("U:%c%c%c%c ", status.usbReady ? 'R' : 'r', status.usbActive ? 'A' : 'a', status.otherSideUsbReady ? 'R' : 'r', status.otherSideUsbActive ? 'A' : 'a');
@@ -2826,7 +2824,8 @@ void hardware_init()
 {
   stdio_init_all();
   stdio_set_translate_crlf(&stdio_usb, false);
-  setTimestamp(&status.lastActiveTimestamp);
+  Timer_set_now();
+  timer_disable(&status.usbInactiveTimer);
   status.toggleUsb = true;
 
   led_init();
@@ -2835,7 +2834,7 @@ void hardware_init()
 
 void synchronizeAndDecideUsbSide()
 {
-  bool shouldSendStatus = timer_elapsed(&send_timer);
+  bool shouldSendStatus = timer_expired(&send_timer);
   if (status.usbActive && !status.usbReady) status.toggleUsb = true;
   if (status.usbActive && status.toggleUsb) status.usbActive = false;
   if (status.otherSideToggleUsb) {
@@ -2845,18 +2844,20 @@ void synchronizeAndDecideUsbSide()
   }
   if (status.otherSideUsbActive) status.usbActive = false;
   if (status.toggleUsb) shouldSendStatus = true;
-  if (status.usbActive || status.otherSideUsbActive)
-    setTimestamp(&status.lastActiveTimestamp);
-  if (status.usbReady && !status.usbActive && !status.otherSideUsbActive) {
-    if (status.commOK && status.mySide == leftSide && elapsed_ms(&status.lastActiveTimestamp, COMM_STATUS_DELAY_MS * 3))
-      status.usbActive = true;
-    if (elapsed_ms(&status.lastActiveTimestamp, COMM_STATUS_DELAY_MS * 6))
-      status.usbActive = true;
-    if (status.usbActive) shouldSendStatus = true;
+  if (status.usbActive || status.otherSideUsbActive) {
+    if (timer_is_enabled(&status.usbInactiveTimer)) timer_disable(&status.usbInactiveTimer);
+  } else {
+    if (!timer_is_enabled(&status.usbInactiveTimer)) timer_enable_ms(&status.usbInactiveTimer, 0);
+    if (status.usbReady) {
+      uint32_t inactive_time = timer_elapsed_ms(&status.usbInactiveTimer);
+      if ((inactive_time > COMM_STATUS_DELAY_MS * 3 && status.commOK && status.mySide == leftSide)
+          || inactive_time > COMM_STATUS_DELAY_MS * 6) {
+        status.usbActive = true;
+        shouldSendStatus = true;
+      }
+    }
   }
-  if (shouldSendStatus) {
-    comm_sendStatus();
-  }
+  if (shouldSendStatus) comm_sendStatus();
   status.toggleUsb = false;
 }
 
@@ -2867,7 +2868,6 @@ int main()
   Controller controller;
   LocalReader localReader;
 
-  update_now();
   hardware_init();
   usb_init(&usb);
   controller_init(&controller, &usb);
@@ -2881,7 +2881,7 @@ int main()
   setUsbSide(noSide);
 
   while (true) {
-    update_now();
+    Timer_set_now();
     comm_task();
     localReader_readKeys(&localReader);
     if (status.usbActive) {
