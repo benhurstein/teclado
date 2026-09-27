@@ -289,10 +289,10 @@ void controller_lockLayer(Controller *self, layer_id_t layer);
 void controller_pressMouseButton(Controller *self, button_t button);
 void controller_releaseMouseButton(Controller *self, button_t button);
 void controller_moveMouse(Controller *self, int v, int h, int wv, int wh);
-void controller_setDelayedReleaseAction(Controller *self, Action action);
 void controller_doCommand(Controller *self, int command);
 void controller_keyPressed(Controller *self, Key *key);
 void controller_keyReleased(Controller *self, Key *key);
+void controller_setOnceLayer(Controller *self, layer_id_t layer);
 
 Key *Key_keyWithId(uint8_t keyId);
 void key_init(Key *self, Controller *controller, uint8_t keyId);
@@ -372,7 +372,6 @@ typedef enum {
   rel_asc_action,
   rel_mod_action,
   rel_layer_action,
-  rel_once_layer_action,
   rel_button_action,
 } action_type_t;
 
@@ -402,7 +401,6 @@ char *action_name[] = {
   [rel_asc_action]        = "rel_asc",
   [rel_mod_action]        = "rel_mod",
   [rel_layer_action]      = "rel_layer",
-  [rel_once_layer_action] = "rel_once_layer",
   [rel_button_action]     = "rel_button",
 };
 
@@ -577,8 +575,8 @@ void hold_layer_actuate(Action *self, Key *key, Controller *controller) {
   key_setReleaseAction(key, REL());
 }
 void once_layer_actuate(Action *self, Key *key, Controller *controller) {
-  controller_changeLayer(controller, self->layer.layer_id);
-  key_setReleaseAction(key, REO());
+  controller_setOnceLayer(controller, self->layer.layer_id);
+  key_setReleaseAction(key, NO_ACTION);
 }
 void lock_layer_actuate(Action *self, Key *key, Controller *controller) {
   controller_lockLayer(controller, self->layer.layer_id);
@@ -630,11 +628,6 @@ void rel_layer_actuate(Action *self, Key *key, Controller *controller) {
   (void)key;
   controller_changeLayer(controller, controller_baseLayer(controller));
 }
-void rel_once_layer_actuate(Action *self, Key *key, Controller *controller) {
-  (void)self;
-  (void)key;
-  controller_setDelayedReleaseAction(controller, REL());
-}
 void rel_button_actuate(Action *self, Key *key, Controller *controller) {
   (void)key;
   controller_releaseMouseButton(controller, self->mouse_button.button);
@@ -670,7 +663,6 @@ void action_actuate(Action *self, Key *key, Controller *controller)
     ACTION_CASE(rel_asc);
     ACTION_CASE(rel_mod);
     ACTION_CASE(rel_layer);
-    ACTION_CASE(rel_once_layer);
     ACTION_CASE(rel_button);
     default: log(LOG_E, "Do not know how to actuate action type %d.", self->action_type);
   }
@@ -1731,6 +1723,8 @@ struct controller {
   layer_id_t currentLayer;
   layer_id_t baseLayer;
   layer_id_t lockLayer;
+  layer_id_t onceLayer;
+  keyboardSide onceSide;
   USB *usb;
   KeyList waitingKeys;
   KeyList keysBeingHeld;
@@ -1741,7 +1735,6 @@ struct controller {
   int16_t mousePos_h;
   int16_t mousePos_wv;
   int16_t mousePos_wh;
-  Action delayedReleaseAction;
   modifier_t modifiers;
   bool wordLocked;
   bool capsLocked;
@@ -1776,10 +1769,10 @@ void controller_init(Controller *self, USB *usb)
   controller__setBaseLayer(self, COLEMAK);
   controller__setCurrentLayer(self, self->baseLayer);
   self->lockLayer = NO_LAYER;
+  self->onceLayer = NO_LAYER;
   self->waitingKeys = NULL;
   self->keysBeingHeld = NULL;
   self->holdSide = noSide;
-  self->delayedReleaseAction = Action_noAction();
   self->modifiers = 0;
   self->wordLocked = false;
   self->capsLocked = false;
@@ -1867,6 +1860,12 @@ static void controller__sendReleaseKeycode(Controller *self, keycode_t keycode)
   usb_releaseKeycode(self->usb, keycode);
 }
 
+void controller_setOnceLayer(Controller *self, layer_id_t layer)
+{
+  self->onceLayer = layer;
+  self->onceSide = noSide;
+}
+
 void controller_changeLayer(Controller *self, layer_id_t layer)
 {
   log(LOG_T, "%s(%d)", __func__, layer);
@@ -1914,24 +1913,38 @@ layer_id_t controller_baseLayer(Controller *self)
   return self->baseLayer;
 }
 
+static Action *controller__actionForKey(Controller *self, Key *key)
+{
+  if (self->onceLayer != NO_LAYER) {
+    keyboardSide keySide = key_side(key);
+    if (self->onceSide == noSide || self->onceSide == keySide) {
+      self->onceSide = key_side(key);
+      return &layer[self->onceLayer][key_id(key)];
+    }
+    self->onceLayer = NO_LAYER;
+  }
+  Action *action = &layer[self->currentLayer][key_id(key)];
+  return action;
+}
+
 static void controller__tapKey(Controller *self, Key *key)
 {
-  Action action = layer[self->currentLayer][key_id(key)];
-  if (action_isMouseMovementAction(&action)) {
+  Action *action = controller__actionForKey(self, key);
+  if (action_isMouseMovementAction(action)) {
     log(LOG_T, "ignoring mouse movement key press");
     return;
   }
-  log(LOG_T, "tapKey %s %s", key_description(key), action_description(&action));
+  log(LOG_T, "tapKey %s %s", key_description(key), action_description(action));
   key_setReleaseAction(key, Action_noAction()); // just in case...
-  action = action_tapAction(&action);
-  log(LOG_T, "tap: %s", action_description(&action));
-  action_actuate(&action, key, self);
+  Action tapAction = action_tapAction(action);
+  log(LOG_T, "tap: %s", action_description(&tapAction));
+  action_actuate(&tapAction, key, self);
 }
 
 static void controller__holdKey(Controller *self, Key *key)
 {
-  Action action = layer[self->currentLayer][key_id(key)];
-  if (action_holdType(&action) == noHoldType) {
+  Action *action = controller__actionForKey(self, key);
+  if (action_holdType(action) == noHoldType) {
     return controller__tapKey(self, key);
   }
   keyboardSide keySide = key_side(key);
@@ -1941,12 +1954,12 @@ static void controller__holdKey(Controller *self, Key *key)
     return controller__tapKey(self, key);
   }
 
-  log(LOG_T, "holdKey %s %s", key_description(key), action_description(&action));
+  log(LOG_T, "holdKey %s %s", key_description(key), action_description(action));
   key_setReleaseAction(key, Action_noAction()); // just in case...
   keyList_insertKey(&self->keysBeingHeld, key);
-  action = action_holdAction(&action);
-  log(LOG_T, "hold: %s", action_description(&action));
-  action_actuate(&action, key, self);
+  Action holdAction = action_holdAction(action);
+  log(LOG_T, "hold: %s", action_description(&holdAction));
+  action_actuate(&holdAction, key, self);
 }
 
 static void controller__releaseKey(Controller *self, Key *key)
@@ -1978,7 +1991,7 @@ void controller_keyPressed(Controller *self, Key *key)
 {
   log(LOG_T, "keyPressed: %s", key_description(key));
   if (keyList_empty(&self->waitingKeys)) {
-    Action *action = &layer[self->currentLayer][key_id(key)];
+    Action *action = controller__actionForKey(self, key);
     if (action_holdType(action) == noHoldType) {
       log(LOG_T, " press action: %s", action_description(action));
       controller__tapKey(self, key);
@@ -2016,8 +2029,6 @@ void controller_tapWaitingKeysUntilKey(Controller *self, Key *lastKey)
 
 void controller_keyReleased(Controller *self, Key *key)
 {
-  Action delayedAction = self->delayedReleaseAction;
-  self->delayedReleaseAction = Action_noAction();
   log(LOG_T, "keyReleased: %s", key_description(key));
   if (keyList_containsKey(&self->waitingKeys, key)) {
     bool its_a_tap = false;
@@ -2027,7 +2038,7 @@ void controller_keyReleased(Controller *self, Key *key)
       its_a_tap = true;
     } else {
       // do not hold a modifier for a key in it's same side
-      Action *firstKeyAction = &layer[self->currentLayer][key_id(firstKey)];
+      Action *firstKeyAction = controller__actionForKey(self, firstKey);
       if (action_holdType(firstKeyAction) == modHoldType
         && key_side(firstKey) == key_side(key)) {
         its_a_tap = true;
@@ -2044,8 +2055,7 @@ void controller_keyReleased(Controller *self, Key *key)
     controller__resetWaitingKeyTimeout(self);
   }
   controller__releaseKey(self, key);
-  log(LOG_T, " delayed action %s", action_description(&delayedAction));
-  action_actuate(&delayedAction, key, self);
+  if (self->onceLayer != NO_LAYER && self->onceSide != noSide) self->onceLayer = NO_LAYER;
 }
 
 void controller_pressKeycode(Controller *self, keycode_t keycode)
@@ -2238,12 +2248,6 @@ void controller_releaseModifier(Controller *self, modifier_t modifier)
 {
   log(LOG_T, "%s(%d)", __func__, modifier);
   controller__removeModifiers(self, modifier);
-}
-void controller_setDelayedReleaseAction(Controller *self, Action action)
-{
-  log(LOG_T, "set delayed");
-  log(LOG_T, "%s: %s", __func__, action_description(&action));
-  self->delayedReleaseAction = action;
 }
 
 void controller_pressMouseButton(Controller *self, button_t button)
