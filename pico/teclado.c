@@ -178,7 +178,7 @@ typedef enum {
   K_DEL     = 0x4C, K_END,     K_PGDN,    K_RIGHT,
   K_LEFT    = 0x50, K_DOWN,    K_UP,      K_NUMLK,
   // keypad
-  K_EURO2   = 0x64, K_APP,     K_POWER,
+  K_EURO2   = 0x64, K_MENU,    K_POWER,
   // keypad, F13-24
   K_STOP    = 0x78, K_REDO,    K_UNDO,    K_CUT,
   K_COPY    = 0x7C, K_PASTE,   K_FIND,    K_MUTE,
@@ -187,7 +187,7 @@ typedef enum {
   K_CTRL    = 0xE0, K_SHFT,    K_ALT,     K_GUI,
   K_RCTRL   = 0xE4, K_RSHFT,   K_RALT,    K_RGUI,
   // alias for compose key -- must configure this on OS
-  K_COMPOSE = K_RGUI,
+  K_COMPOSE = K_MENU,
 } keycode_t;
 
 bool keycode_is_modifier(keycode_t keycode)
@@ -744,7 +744,7 @@ Action layer[][N_KEYS] = {
     KOM(K_A,GUI   ), KOM(K_R,ALT   ), KOM(K_S,CTRL  ), KOM(K_T,SHFT  ), KEY(K_G       ),
     KEY(K_Z       ), KOM(K_X,RALT  ), KEY(K_C       ), KEY(K_D       ), KEY(K_V       ),
     KOL(K_ESC,RAT ), KOL(K_SPC,NAV ), KOL(K_TAB,NUM ),
-    KEY(K_J       ), KEY(K_L       ), KEY(K_U       ), KEY(K_Y       ), LA1(ACC   ),
+    KEY(K_J       ), KEY(K_L       ), KEY(K_U       ), KEY(K_Y       ), LA1(ACC       ),
     KEY(K_M       ), KOM(K_N,SHFT  ), KOM(K_E,CTRL  ), KOM(K_I,ALT   ), KOM(K_O,GUI   ),
     KEY(K_K       ), KEY(K_H       ), KEY(K_COMMA   ), KOM(K_DOT,RALT), KEY(K_SLASH   ),
     KOL(K_ENT,ACC ), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
@@ -796,7 +796,7 @@ Action layer[][N_KEYS] = {
     NO_ACTION,       NO_ACTION,       NO_ACTION,
     KEY(K_INSERT  ), KEY(K_HOME    ), KEY(K_UP      ), KEY(K_END     ), KEY(K_PGUP    ),
     COM(WORDLOCK  ), KEY(K_LEFT    ), KEY(K_DOWN    ), KEY(K_RIGHT   ), KEY(K_PGDN    ),
-    NO_ACTION,       NO_ACTION,       NO_ACTION,       NO_ACTION,       NO_ACTION,
+    KEY(K_REDO    ), KEY(K_PASTE   ), KEY(K_COPY    ), KEY(K_CUT     ), KEY(K_UNDO    ),
     KEY(K_ENT     ), KEY(K_BS      ), KEY(K_DEL     ),
   },
   [NUM] = {
@@ -823,8 +823,8 @@ Action layer[][N_KEYS] = {
     KEY(K_F12     ), KEY(K_F7      ), KEY(K_F8      ), KEY(K_F9      ), KEY(K_PRTSC   ),
     KEY(K_F11     ), KEY(K_F4      ), KEY(K_F5      ), KEY(K_F6      ), KEY(K_SCRLK   ),
     KEY(K_F10     ), KEY(K_F1      ), KEY(K_F2      ), KEY(K_F3      ), KEY(K_PAUSE   ),
-    KEY(K_APP     ), KEY(K_SPC     ), KEY(K_TAB     ),
-    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       NO_ACTION,
+    KEY(K_MENU    ), KEY(K_SPC     ), KEY(K_TAB     ),
+    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       KEY(K_POWER   ),
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
     NO_ACTION,       LCK(FUN       ), LCK(RAT       ), MOD(RALT      ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
@@ -1862,8 +1862,32 @@ static void controller__sendReleaseKeycode(Controller *self, keycode_t keycode)
 
 void controller_setOnceLayer(Controller *self, layer_id_t layer)
 {
-  self->onceLayer = layer;
+  self->onceLayer = self->currentLayer;
   self->onceSide = noSide;
+  self->currentLayer = layer;
+}
+
+static void controller__checkOnceLayer_tap(Controller *self, Key *key)
+{
+  if (self->onceLayer == NO_LAYER) return;
+
+  // the first tap defines once side
+  keyboardSide keySide = key_side(key);
+  if (self->onceSide == noSide) self->onceSide = keySide;
+  // first tap on different side goes back to normal layer
+  if (self->onceSide != keySide) {
+    self->currentLayer = self->onceLayer;
+    self->onceLayer = NO_LAYER;
+  }
+}
+
+static void controller__checkOnceLayer_release(Controller *self)
+{
+  // first key release after a tap goes back to normal layer
+  if (self->onceLayer == NO_LAYER) return;
+  if (self->onceSide == noSide) return;
+  self->currentLayer = self->onceLayer;
+  self->onceLayer = NO_LAYER;
 }
 
 void controller_changeLayer(Controller *self, layer_id_t layer)
@@ -1915,20 +1939,12 @@ layer_id_t controller_baseLayer(Controller *self)
 
 static Action *controller__actionForKey(Controller *self, Key *key)
 {
-  if (self->onceLayer != NO_LAYER) {
-    keyboardSide keySide = key_side(key);
-    if (self->onceSide == noSide || self->onceSide == keySide) {
-      self->onceSide = key_side(key);
-      return &layer[self->onceLayer][key_id(key)];
-    }
-    self->onceLayer = NO_LAYER;
-  }
-  Action *action = &layer[self->currentLayer][key_id(key)];
-  return action;
+  return &layer[self->currentLayer][key_id(key)];
 }
 
 static void controller__tapKey(Controller *self, Key *key)
 {
+  controller__checkOnceLayer_tap(self, key);
   Action *action = controller__actionForKey(self, key);
   if (action_isMouseMovementAction(action)) {
     log(LOG_T, "ignoring mouse movement key press");
@@ -2055,7 +2071,7 @@ void controller_keyReleased(Controller *self, Key *key)
     controller__resetWaitingKeyTimeout(self);
   }
   controller__releaseKey(self, key);
-  if (self->onceLayer != NO_LAYER && self->onceSide != noSide) self->onceLayer = NO_LAYER;
+  controller__checkOnceLayer_release(self);
 }
 
 void controller_pressKeycode(Controller *self, keycode_t keycode)
