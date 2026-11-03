@@ -832,7 +832,7 @@ Action layer[][N_KEYS] = {
     ASC(';', ':'  ), ASC('*', '^'  ), ASC('(', '<'  ), ASC(')', '>'  ), ASC('=', '+'  ),
     ASC('`', '~'  ), ASC('!', '$'  ), ASC('@', '%'  ), ASC('#', '&'  ), ASC('\\','|'  ),
     KEY(K_ESC     ), KEY(K_SPC     ), KEY(K_TAB     ),
-    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), BAS(CO1       ), CMD(USB_SIDE  ),
+    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       CMD(USB_SIDE  ),
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
     NO_ACTION,       LCK(SYM       ), LCK(NAV       ), MOD(RALT      ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
