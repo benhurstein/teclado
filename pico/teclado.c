@@ -1794,6 +1794,7 @@ void controller_init(Controller *self, USB *usb)
   self->holdSide = noSide;
   self->modifiers = 0;
   self->wordLocked = false;
+  self->letterLocked = false;
   self->capsLocked = false;
 }
 
