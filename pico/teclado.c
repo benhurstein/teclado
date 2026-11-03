@@ -141,6 +141,8 @@ typedef enum {
   NUM,
   FUN,
   NUM2,
+  CO1,
+  CO1i,
   NO_LAYER,
 } layer_id_t;
 
@@ -855,6 +857,26 @@ Action layer[][N_KEYS] = {
     NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       NO_ACTION,
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
     NO_ACTION,       LCK(NUM2      ), LCK(NUM       ), MOD(RALT      ), NO_ACTION,
+    NO_ACTION,       NO_ACTION,       NO_ACTION,
+  },
+  [CO1] = {
+    KEY(K_Q       ), KEY(K_W       ), KEY(K_F       ), KEY(K_P       ), KEY(K_B       ),
+    KOM(K_A,GUI   ), KOM(K_R,ALT   ), KOM(K_S,CTRL  ), KOM(K_T,SHFT  ), KEY(K_G       ),
+    KEY(K_Z       ), KOM(K_X,RALT  ), KEY(K_C       ), KEY(K_D       ), KEY(K_V       ),
+    KOL(K_BS,SYM  ), KOL(K_SPC,CO1i), KOL(K_ENT,ACC ),
+    KEY(K_J       ), KEY(K_L       ), KEY(K_U       ), KEY(K_Y       ), LA1(ACC       ),
+    KEY(K_M       ), KOM(K_N,SHFT  ), KOM(K_E,CTRL  ), KOM(K_I,ALT   ), KOM(K_O,GUI   ),
+    KEY(K_K       ), KEY(K_H       ), KEY(K_COMMA   ), KOM(K_DOT,RALT), KEY(K_SLASH   ),
+    KOL(K_ENT,ACC ), KOL(K_SPC,CO1i), KOL(K_BS,SYM  ),
+  },
+  [CO1i] = {
+    LA1(ACC       ), KEY(K_Y       ), KEY(K_U       ), KEY(K_L       ), KEY(K_J       ),
+    KOM(K_O,GUI   ), KOM(K_I,ALT   ), KOM(K_E,CTRL  ), KOM(K_N,SHFT  ), KEY(K_M       ),
+    KEY(K_SLASH   ), KOM(K_DOT,RALT), KEY(K_COMMA   ), KEY(K_H       ), KEY(K_K       ),
+    NO_ACTION,       NO_ACTION,       NO_ACTION,
+    KEY(K_B       ), KEY(K_P       ), KEY(K_F       ), KEY(K_W       ), KEY(K_Q       ),
+    KEY(K_G       ), KOM(K_T,SHFT  ), KOM(K_S,CTRL  ), KOM(K_R,ALT   ), KOM(K_A,GUI   ),
+    KEY(K_V       ), KEY(K_D       ), KEY(K_C       ), KOM(K_X,RALT  ), KEY(K_Z       ),
     NO_ACTION,       NO_ACTION,       NO_ACTION,
   },
 };
