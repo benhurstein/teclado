@@ -348,6 +348,10 @@ void log_set_level(uint8_t new_level)
 
 // Action {{{1
 // all things that can happen when a key is pressed or released
+
+// possible commands in cmd action
+typedef enum { RESET, LETTERLOCK, WORDLOCK, USB_SIDE } cmd_t;
+
 typedef enum {
   no_action,
   key_action,
@@ -363,10 +367,11 @@ typedef enum {
   str_or_mod_action,
   key_or_layer_action,
   str_or_layer_action,
+  cmd_or_layer_action,
   once_or_mod_action,
   mouse_move_action,
   mouse_button_action,
-  command_action,
+  cmd_action,
 
   rel_key_action,
   rel_asc_action,
@@ -388,14 +393,15 @@ char *action_name[] = {
   [hold_layer_action]     = "hold_layer",
   [once_layer_action]     = "once_layer",
   [lock_layer_action]     = "lock_layer",
+  [cmd_action]            = "cmd",
+  [mouse_move_action]     = "mouse_move",
+  [mouse_button_action]   = "mouse_button",
   [key_or_mod_action]     = "key_or_mod",
   [str_or_mod_action]     = "str_or_mod",
   [key_or_layer_action]   = "key_or_layer",
   [str_or_layer_action]   = "str_or_layer",
+  [cmd_or_layer_action]   = "cmd_or_layer",
   [once_or_mod_action]    = "once_or_mod",
-  [mouse_move_action]     = "mouse_move",
-  [mouse_button_action]   = "mouse_button",
-  [command_action]        = "command",
   // release actions
   [rel_key_action]        = "rel_key",
   [rel_asc_action]        = "rel_asc",
@@ -425,6 +431,9 @@ typedef struct {
   layer_id_t layer_id;
 } layer_action_t;
 typedef struct {
+  cmd_t cmd;
+} cmd_action_t;
+typedef struct {
   keycode_t keycode;
   modifier_t modifier;
 } key_or_mod_action_t;
@@ -440,6 +449,10 @@ typedef struct {
   char *str;
   layer_id_t layer_id;
 } str_or_layer_action_t;
+typedef struct {
+  cmd_t cmd;
+  layer_id_t layer_id;
+} cmd_or_layer_action_t;
 typedef struct {
   layer_id_t layer_id;
   modifier_t modifier;
@@ -459,9 +472,6 @@ typedef struct {
 typedef struct {
   button_t button;
 } mouse_button_action_t;
-typedef struct {
-  enum { RESET, WORDLOCK, USB_SIDE } command;
-} command_action_t;
 
 struct action {
   action_type_t action_type;
@@ -472,14 +482,15 @@ struct action {
     str_action_t str;
     mod_action_t mod;
     layer_action_t layer;
+    cmd_action_t cmd;
     key_or_mod_action_t key_or_mod;
     str_or_mod_action_t str_or_mod;
     key_or_layer_action_t key_or_layer;
     str_or_layer_action_t str_or_layer;
+    cmd_or_layer_action_t cmd_or_layer;
     layer_or_mod_action_t layer_or_mod;
     mouse_move_action_t mouse_move;
     mouse_button_action_t mouse_button;
-    command_action_t command;
   };
 };
 
@@ -515,7 +526,9 @@ struct action {
 // tap=change layer for next key only, hold=send modifiers
 #define L1M(l,m)   (Action){ once_or_mod_action,  .layer_or_mod = { l, m } }
 // execute a command
-#define COM(c)     (Action){ command_action,      .command = { c } }
+#define CMD(c)     (Action){ cmd_action,          .cmd = { c } }
+// tap=execute a command; hold=change layer
+#define COL(c,l)   (Action){ cmd_or_layer_action, .cmd_or_layer = { c, l } }
 // send a mouse movement
 #define MOU(m)     (Action){ mouse_move_action,   .mouse_move = { m } }
 // send a mouse button press
@@ -605,8 +618,8 @@ void mouse_button_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressMouseButton(controller, self->mouse_button.button);
   key_setReleaseAction(key, REB(self->mouse_button.button));
 }
-void command_actuate(Action *self, Key *key, Controller *controller) {
-  controller_doCommand(controller, self->command.command);
+void cmd_actuate(Action *self, Key *key, Controller *controller) {
+  controller_doCommand(controller, self->cmd.cmd);
   key_setReleaseAction(key, NO_ACTION);
 }
 
@@ -658,7 +671,7 @@ void action_actuate(Action *self, Key *key, Controller *controller)
     ACTION_CASE(lock_layer);
     ACTION_CASE(mouse_move);
     ACTION_CASE(mouse_button);
-    ACTION_CASE(command);
+    ACTION_CASE(cmd);
     ACTION_CASE(rel_key);
     ACTION_CASE(rel_asc);
     ACTION_CASE(rel_mod);
@@ -677,6 +690,7 @@ enum holdType action_holdType(Action *self)
       return modHoldType;
     case key_or_layer_action:
     case str_or_layer_action:
+    case cmd_or_layer_action:
       return layerHoldType;
     default:
       return noHoldType;
@@ -711,6 +725,8 @@ Action action_tapAction(Action *self)
       return KEY(self->key_or_layer.keycode);
     case str_or_layer_action:
       return STR(self->str_or_layer.str);
+    case cmd_or_layer_action:
+      return CMD(self->cmd_or_layer.cmd);
     case once_or_mod_action:
       return LA1(self->layer_or_mod.layer_id);
     default:
@@ -729,6 +745,8 @@ Action action_holdAction(Action *self)
       return LAH(self->key_or_layer.layer_id);
     case str_or_layer_action:
       return LAH(self->str_or_layer.layer_id);
+    case cmd_or_layer_action:
+      return LAH(self->cmd_or_layer.layer_id);
     case once_or_mod_action:
       return MOD(self->layer_or_mod.modifier);
     default:
@@ -747,7 +765,7 @@ Action layer[][N_KEYS] = {
     KEY(K_J       ), KEY(K_L       ), KEY(K_U       ), KEY(K_Y       ), LA1(ACC       ),
     KEY(K_M       ), KOM(K_N,SHFT  ), KOM(K_E,CTRL  ), KOM(K_I,ALT   ), KOM(K_O,GUI   ),
     KEY(K_K       ), KEY(K_H       ), KEY(K_COMMA   ), KOM(K_DOT,RALT), KEY(K_SLASH   ),
-    KOL(K_ENT,ACC ), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
+    KOL(K_ENT,ACC ), KOL(K_BS,SYM  ), COL(LETTERLOCK,FUN),
   },
   [ACC] = {
     ASC('\'', '`' ), ASC('"', '~'  ), STR("«"       ), STR("»"       ), STR("ª"       ),
@@ -757,7 +775,7 @@ Action layer[][N_KEYS] = {
     STR("º"       ), STR("€"       ), STR("ú"       ), KEY(K_Y       ), KEY(K_COMPOSE ),
     KEY(K_M       ), SOM("ñ",SHFT  ), STR("é"       ), STR("í"       ), STR("ó"       ),
     KEY(K_K       ), KEY(K_H       ), STR("ê"       ), STR("õ"       ), STR("ô"       ),
-    KOL(K_ENT,NUM2), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
+    KOL(K_ENT,NUM2), KOL(K_BS,SYM  ), COL(LETTERLOCK,FUN),
   },
   [QWERTY] = {
     KEY(K_Q       ), KEY(K_W       ), KEY(K_E       ), KEY(K_R       ), KEY(K_T       ),
@@ -780,7 +798,7 @@ Action layer[][N_KEYS] = {
     KOL(K_ENT,NUM2), KOL(K_BS,SYM  ), KOL(K_DEL,FUN ),
   },
   [RAT] = {
-    COM(RESET     ), NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
+    CMD(RESET     ), NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
     MOD(GUI       ), MOD(ALT       ), MOD(CTRL      ), MOD(SHFT      ), NO_ACTION,
     NO_ACTION,       MOD(RALT      ), LCK(FUN       ), LCK(RAT       ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
@@ -790,12 +808,12 @@ Action layer[][N_KEYS] = {
     BUT(but_right ), BUT(but_left  ), BUT(but_middle),
   },
   [NAV] = {
-    COM(USB_SIDE  ), NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
+    CMD(USB_SIDE  ), NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
     MOD(GUI       ), MOD(ALT       ), MOD(CTRL      ), MOD(SHFT      ), NO_ACTION,
     NO_ACTION,       MOD(RALT      ), LCK(SYM       ), LCK(NAV       ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
     KEY(K_INSERT  ), KEY(K_HOME    ), KEY(K_UP      ), KEY(K_END     ), KEY(K_PGUP    ),
-    COM(WORDLOCK  ), KEY(K_LEFT    ), KEY(K_DOWN    ), KEY(K_RIGHT   ), KEY(K_PGDN    ),
+    CMD(WORDLOCK  ), KEY(K_LEFT    ), KEY(K_DOWN    ), KEY(K_RIGHT   ), KEY(K_PGDN    ),
     KEY(K_REDO    ), KEY(K_PASTE   ), KEY(K_COPY    ), KEY(K_CUT     ), KEY(K_UNDO    ),
     KEY(K_ENT     ), KEY(K_BS      ), KEY(K_DEL     ),
   },
@@ -814,7 +832,7 @@ Action layer[][N_KEYS] = {
     ASC(';', ':'  ), ASC('*', '^'  ), ASC('(', '<'  ), ASC(')', '>'  ), ASC('=', '+'  ),
     ASC('`', '~'  ), ASC('!', '$'  ), ASC('@', '%'  ), ASC('#', '&'  ), ASC('\\','|'  ),
     KEY(K_ESC     ), KEY(K_SPC     ), KEY(K_TAB     ),
-    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       COM(USB_SIDE  ),
+    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), BAS(CO1       ), CMD(USB_SIDE  ),
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
     NO_ACTION,       LCK(SYM       ), LCK(NAV       ), MOD(RALT      ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
@@ -1736,6 +1754,7 @@ struct controller {
   int16_t mousePos_wv;
   int16_t mousePos_wh;
   modifier_t modifiers;
+  bool letterLocked;
   bool wordLocked;
   bool capsLocked;
   layer_id_t changeToLayer;
@@ -1819,6 +1838,11 @@ static void controller__setWordLock(Controller *self, bool newVal)
   led_setWordLock(newVal);
 }
 
+static void controller__setLetterLock(Controller *self, bool newVal)
+{
+  self->letterLocked = newVal;
+}
+
 static void controller__setModifiers(Controller *self, modifier_t new_modifiers)
 {
   self->modifiers = new_modifiers;
@@ -1842,15 +1866,19 @@ static bool controller__isShifted(Controller *self)
 
 static void controller__sendPressKeycode(Controller *self, keycode_t keycode)
 {
-  if (self->wordLocked && !keycode_in_word(keycode, controller__isShifted(self))) {
+  if ((self->wordLocked || self->letterLocked) &&
+      !keycode_in_word(keycode, controller__isShifted(self))) {
     controller__setWordLock(self, false);
+    controller__setLetterLock(self, false);
   }
-  if (self->wordLocked && keycode_in_word_invert_shift(keycode)) {
+  bool caps = self->wordLocked ^ self->letterLocked;
+  if (caps && keycode_in_word_invert_shift(keycode)) {
     usb_setModifiers(self->usb, self->modifiers ^ SHFT);
   } else {
     usb_setModifiers(self->usb, self->modifiers);
   }
   usb_pressKeycode(self->usb, keycode);
+  controller__setLetterLock(self, false);
   usb_setModifiers(self->usb, self->modifiers);
 }
 
@@ -2210,8 +2238,12 @@ static void controller__sendUtf8Str(Controller *self, char s[])
   while (true) {
     unicode uni = unicode_from_utf8(s);
     if (uni == 0) break;
-    if (self->wordLocked && !uni_in_word(uni)) controller__setWordLock(self, false);
-    if (shifted ^ capsLocked ^ self->wordLocked) uni = unicode_to_upper(uni);
+    if ((self->wordLocked || self->letterLocked) && !uni_in_word(uni)) {
+      controller__setWordLock(self, false);
+      controller__setLetterLock(self, false);
+    }
+    bool caps = shifted ^ capsLocked ^ self->wordLocked ^ self->letterLocked;
+    if (caps) uni = unicode_to_upper(uni);
     controller__sendUsbUnicodeChar(self, uni);
     s += utf8_nbytes(s);
   }
@@ -2219,14 +2251,20 @@ static void controller__sendUtf8Str(Controller *self, char s[])
     usb_pressKeycode(self->usb, K_CAPS);
     usb_releaseKeycode(self->usb, K_CAPS);
   }
+  controller__setLetterLock(self, false);
   controller__setModifiers(self, save_modifiers);
 }
 
 static uint8_t controller__sendPressAsciiChar(Controller *self, uint8_t ch)
 {
-  if (self->wordLocked && !uni_in_word(ch)) controller__setWordLock(self, false);
-  if (self->wordLocked) ch = unicode_to_upper(ch);
+  if ((self->wordLocked || self->letterLocked) && !uni_in_word(ch)) {
+    controller__setWordLock(self, false);
+    controller__setLetterLock(self, false);
+  }
+  bool caps = self->wordLocked ^ self->letterLocked;
+  if (caps) ch = unicode_to_upper(ch);
   controller__sendUsbPressAsciiChar(self, ch);
+  controller__setLetterLock(self, false);
   return ch;
 }
 
@@ -2320,6 +2358,14 @@ void controller_doCommand(Controller *self, int command)
   if (command == WORDLOCK) {
     controller__setWordLock(self, !self->wordLocked);
     return;
+  } else if (command == LETTERLOCK) {
+      if (self->letterLocked) {
+        controller__setWordLock(self, true);
+        controller__setLetterLock(self, false);
+      } else {
+        controller__setLetterLock(self, true);
+      }
+      return;
   } else if (command == RESET) {
     reset_usb_boot(0, 0);
     return;
