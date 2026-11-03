@@ -284,6 +284,7 @@ char controller_pressAscii(Controller *self, char unshifted, char shifted);
 void controller_releaseAscii(Controller *self, char c);
 void controller_pressModifier(Controller *self, modifier_t modifier);
 void controller_releaseModifier(Controller *self, modifier_t modifier);
+void controller_pressOneShotModifier(Controller *self, modifier_t modifier);
 void controller_changeLayer(Controller *self, layer_id_t layer);
 void controller_lockLayer(Controller *self, layer_id_t layer);
 void controller_pressMouseButton(Controller *self, button_t button);
@@ -358,6 +359,7 @@ typedef enum {
   asc_action,
   str_action,
   mod_action,
+  omod_action,
   layer_action,
   base_layer_action,
   hold_layer_action,
@@ -366,6 +368,7 @@ typedef enum {
   key_or_mod_action,
   str_or_mod_action,
   key_or_layer_action,
+  omod_or_layer_action,
   str_or_layer_action,
   cmd_or_layer_action,
   once_or_mod_action,
@@ -388,6 +391,7 @@ char *action_name[] = {
   [asc_action]            = "asc",
   [str_action]            = "str",
   [mod_action]            = "mod",
+  [omod_action]           = "omod",
   [layer_action]          = "layer",
   [base_layer_action]     = "base_layer",
   [hold_layer_action]     = "hold_layer",
@@ -399,6 +403,7 @@ char *action_name[] = {
   [key_or_mod_action]     = "key_or_mod",
   [str_or_mod_action]     = "str_or_mod",
   [key_or_layer_action]   = "key_or_layer",
+  [omod_or_layer_action]  = "omod_or_layer",
   [str_or_layer_action]   = "str_or_layer",
   [cmd_or_layer_action]   = "cmd_or_layer",
   [once_or_mod_action]    = "once_or_mod",
@@ -428,6 +433,9 @@ typedef struct {
   modifier_t modifier;
 } mod_action_t;
 typedef struct {
+  modifier_t modifier;
+} omod_action_t;
+typedef struct {
   layer_id_t layer_id;
 } layer_action_t;
 typedef struct {
@@ -445,6 +453,10 @@ typedef struct {
   keycode_t keycode;
   layer_id_t layer_id;
 } key_or_layer_action_t;
+typedef struct {
+  modifier_t modifier;
+  layer_id_t layer_id;
+} omod_or_layer_action_t;
 typedef struct {
   char *str;
   layer_id_t layer_id;
@@ -481,11 +493,13 @@ struct action {
     rea_action_t rea;
     str_action_t str;
     mod_action_t mod;
+    omod_action_t omod;
     layer_action_t layer;
     cmd_action_t cmd;
     key_or_mod_action_t key_or_mod;
     str_or_mod_action_t str_or_mod;
     key_or_layer_action_t key_or_layer;
+    omod_or_layer_action_t omod_or_layer;
     str_or_layer_action_t str_or_layer;
     cmd_or_layer_action_t cmd_or_layer;
     layer_or_mod_action_t layer_or_mod;
@@ -505,12 +519,16 @@ struct action {
 #define STR(s)     (Action){ str_action,          .str = { s } }
 // send modifiers
 #define MOD(m)     (Action){ mod_action,          .mod = { m } }
+// send one-shot modifiers
+#define OMO(m)     (Action){ omod_action,         .mod = { m } }
 // tap=send keycode; hold=send modifiers
 #define KOM(k,m)   (Action){ key_or_mod_action,   .key_or_mod = { k, m } }
 // tap=send utf8 string; hold=send modifiers
 #define SOM(s,m)   (Action){ str_or_mod_action,   .str_or_mod = { s, m } }
 // tap=send keycode; hold=change layer
 #define KOL(k,l)   (Action){ key_or_layer_action, .key_or_layer = { k, l } }
+// tap=send one-shot modifier; hold=change layer
+#define OOL(m,l)   (Action){ omod_or_layer_action, .omod_or_layer = { m, l } }
 // tap=send utf8 string; hold=change layer
 #define SOL(s,l)   (Action){ str_or_layer_action, .str_or_layer = { s, l } }
 // change layer
@@ -574,6 +592,10 @@ void str_actuate(Action *self, Key *key, Controller *controller) {
 void mod_actuate(Action *self, Key *key, Controller *controller) {
   controller_pressModifier(controller, self->mod.modifier);
   key_setReleaseAction(key, REM(self->mod.modifier));
+}
+void omod_actuate(Action *self, Key *key, Controller *controller) {
+  controller_pressOneShotModifier(controller, self->mod.modifier);
+  key_setReleaseAction(key, NO_ACTION);
 }
 void layer_actuate(Action *self, Key *key, Controller *controller) {
   controller_changeLayer(controller, self->layer.layer_id);
@@ -664,6 +686,7 @@ void action_actuate(Action *self, Key *key, Controller *controller)
     ACTION_CASE(asc);
     ACTION_CASE(str);
     ACTION_CASE(mod);
+    ACTION_CASE(omod);
     ACTION_CASE(layer);
     ACTION_CASE(base_layer);
     ACTION_CASE(hold_layer);
@@ -689,6 +712,7 @@ enum holdType action_holdType(Action *self)
     case once_or_mod_action:
       return modHoldType;
     case key_or_layer_action:
+    case omod_or_layer_action:
     case str_or_layer_action:
     case cmd_or_layer_action:
       return layerHoldType;
@@ -723,6 +747,8 @@ Action action_tapAction(Action *self)
       return STR(self->str_or_mod.str);
     case key_or_layer_action:
       return KEY(self->key_or_layer.keycode);
+    case omod_or_layer_action:
+      return OMO(self->omod_or_layer.modifier);
     case str_or_layer_action:
       return STR(self->str_or_layer.str);
     case cmd_or_layer_action:
@@ -743,6 +769,8 @@ Action action_holdAction(Action *self)
       return MOD(self->str_or_mod.modifier);
     case key_or_layer_action:
       return LAH(self->key_or_layer.layer_id);
+    case omod_or_layer_action:
+      return LAH(self->omod_or_layer.layer_id);
     case str_or_layer_action:
       return LAH(self->str_or_layer.layer_id);
     case cmd_or_layer_action:
@@ -1754,6 +1782,7 @@ struct controller {
   int16_t mousePos_wv;
   int16_t mousePos_wh;
   modifier_t modifiers;
+  modifier_t oneShotModifiers;
   bool letterLocked;
   bool wordLocked;
   bool capsLocked;
@@ -1793,6 +1822,7 @@ void controller_init(Controller *self, USB *usb)
   self->keysBeingHeld = NULL;
   self->holdSide = noSide;
   self->modifiers = 0;
+  self->oneShotModifiers = 0;
   self->wordLocked = false;
   self->letterLocked = false;
   self->capsLocked = false;
@@ -1858,6 +1888,20 @@ static void controller__addModifiers(Controller *self, modifier_t new_modifiers)
 static void controller__removeModifiers(Controller *self, modifier_t new_modifiers)
 {
   controller__setModifiers(self, self->modifiers & ~new_modifiers);
+}
+
+static void controller__toggleOneShotModifiers(Controller *self, modifier_t new_modifiers)
+{
+  self->oneShotModifiers ^= new_modifiers;
+  self->modifiers ^= new_modifiers;
+  controller__setModifiers(self, self->modifiers);
+}
+
+static void controller__resetOneShotModifiers(Controller *self)
+{
+  self->modifiers ^= self->oneShotModifiers;
+  self->oneShotModifiers = 0;
+  controller__setModifiers(self, self->modifiers);
 }
 
 static bool controller__isShifted(Controller *self)
@@ -1973,6 +2017,7 @@ static Action *controller__actionForKey(Controller *self, Key *key)
 
 static void controller__tapKey(Controller *self, Key *key)
 {
+  bool oneShot = self->oneShotModifiers != 0;
   controller__checkOnceLayer_tap(self, key);
   Action *action = controller__actionForKey(self, key);
   if (action_isMouseMovementAction(action)) {
@@ -1984,6 +2029,7 @@ static void controller__tapKey(Controller *self, Key *key)
   Action tapAction = action_tapAction(action);
   log(LOG_T, "tap: %s", action_description(&tapAction));
   action_actuate(&tapAction, key, self);
+  //if (oneShot) controller__resetOneShotModifiers(self);
 }
 
 static void controller__holdKey(Controller *self, Key *key)
@@ -2303,6 +2349,11 @@ void controller_releaseModifier(Controller *self, modifier_t modifier)
 {
   log(LOG_T, "%s(%d)", __func__, modifier);
   controller__removeModifiers(self, modifier);
+}
+void controller_pressOneShotModifier(Controller *self, modifier_t modifier)
+{
+  log(LOG_T, "%s(%d)", __func__, modifier);
+  controller__toggleOneShotModifiers(self, modifier);
 }
 
 void controller_pressMouseButton(Controller *self, button_t button)
