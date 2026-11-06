@@ -141,6 +141,8 @@ typedef enum {
   NUM,
   FUN,
   NUM2,
+  CO1,
+  CO1i,
   NO_LAYER,
 } layer_id_t;
 
@@ -366,6 +368,7 @@ typedef enum {
   once_layer_action,
   lock_layer_action,
   key_or_mod_action,
+  key_or_smod_action,
   str_or_mod_action,
   key_or_layer_action,
   omod_or_layer_action,
@@ -401,6 +404,7 @@ char *action_name[] = {
   [mouse_move_action]     = "mouse_move",
   [mouse_button_action]   = "mouse_button",
   [key_or_mod_action]     = "key_or_mod",
+  [key_or_smod_action]    = "key_or_smod",
   [str_or_mod_action]     = "str_or_mod",
   [key_or_layer_action]   = "key_or_layer",
   [omod_or_layer_action]  = "omod_or_layer",
@@ -523,6 +527,8 @@ struct action {
 #define OMO(m)     (Action){ omod_action,         .mod = { m } }
 // tap=send keycode; hold=send modifiers
 #define KOM(k,m)   (Action){ key_or_mod_action,   .key_or_mod = { k, m } }
+// tap=send keycode; hold=send sticky modifier
+#define KOS(k,m)   (Action){ key_or_smod_action,  .key_or_mod = { k, m } }
 // tap=send utf8 string; hold=send modifiers
 #define SOM(s,m)   (Action){ str_or_mod_action,   .str_or_mod = { s, m } }
 // tap=send keycode; hold=change layer
@@ -836,7 +842,7 @@ Action layer[][N_KEYS] = {
     BUT(but_right ), BUT(but_left  ), BUT(but_middle),
   },
   [NAV] = {
-    CMD(USB_SIDE  ), NO_ACTION,       BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
+    CMD(USB_SIDE  ), BAS(CO1       ), BAS(QWERTY    ), BAS(COLEMAK   ), NO_ACTION,
     MOD(GUI       ), MOD(ALT       ), MOD(CTRL      ), MOD(SHFT      ), NO_ACTION,
     NO_ACTION,       MOD(RALT      ), LCK(SYM       ), LCK(NAV       ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
@@ -860,7 +866,7 @@ Action layer[][N_KEYS] = {
     ASC(';', ':'  ), ASC('*', '^'  ), ASC('(', '<'  ), ASC(')', '>'  ), ASC('=', '+'  ),
     ASC('`', '~'  ), ASC('!', '$'  ), ASC('@', '%'  ), ASC('#', '&'  ), ASC('\\','|'  ),
     KEY(K_ESC     ), KEY(K_SPC     ), KEY(K_TAB     ),
-    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       CMD(USB_SIDE  ),
+    NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), BAS(CO1       ), CMD(USB_SIDE  ),
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
     NO_ACTION,       LCK(SYM       ), LCK(NAV       ), MOD(RALT      ), NO_ACTION,
     NO_ACTION,       NO_ACTION,       NO_ACTION,
@@ -883,6 +889,26 @@ Action layer[][N_KEYS] = {
     NO_ACTION,       BAS(COLEMAK   ), BAS(QWERTY    ), NO_ACTION,       NO_ACTION,
     NO_ACTION,       MOD(SHFT      ), MOD(CTRL      ), MOD(ALT       ), MOD(GUI       ),
     NO_ACTION,       LCK(NUM2      ), LCK(NUM       ), MOD(RALT      ), NO_ACTION,
+    NO_ACTION,       NO_ACTION,       NO_ACTION,
+  },
+  [CO1] = {
+    KEY(K_Q       ), KEY(K_W       ), KEY(K_F       ), KEY(K_P       ), KEY(K_B       ),
+    KOS(K_A,GUI   ), KOS(K_R,ALT   ), KOS(K_S,CTRL  ), KOS(K_T,SHFT  ), KEY(K_G       ),
+    KEY(K_Z       ), KOS(K_X,RALT  ), KEY(K_C       ), KEY(K_D       ), KEY(K_V       ),
+    KOL(K_BS,SYM  ), KOL(K_SPC,CO1i), KOL(K_ENT,ACC ),
+    KEY(K_J       ), KEY(K_L       ), KEY(K_U       ), KEY(K_Y       ), LA1(ACC       ),
+    KEY(K_M       ), KOS(K_N,SHFT  ), KOS(K_E,CTRL  ), KOS(K_I,ALT   ), KOS(K_O,GUI   ),
+    KEY(K_K       ), KEY(K_H       ), KEY(K_COMMA   ), KOS(K_DOT,RALT), KEY(K_SLASH   ),
+    KOL(K_ENT,ACC ), KOL(K_SPC,CO1i), KOL(K_BS,SYM  ),
+  },
+  [CO1i] = {
+    LA1(ACC       ), KEY(K_Y       ), KEY(K_U       ), KEY(K_L       ), KEY(K_J       ),
+    KOS(K_O,GUI   ), KOS(K_I,ALT   ), KOS(K_E,CTRL  ), KOS(K_N,SHFT  ), KEY(K_M       ),
+    KEY(K_SLASH   ), KOS(K_DOT,RALT), KEY(K_COMMA   ), KEY(K_H       ), KEY(K_K       ),
+    NO_ACTION,       NO_ACTION,       NO_ACTION,
+    KEY(K_B       ), KEY(K_P       ), KEY(K_F       ), KEY(K_W       ), KEY(K_Q       ),
+    KEY(K_G       ), KOS(K_T,SHFT  ), KOS(K_S,CTRL  ), KOS(K_R,ALT   ), KOS(K_A,GUI   ),
+    KEY(K_V       ), KEY(K_D       ), KEY(K_C       ), KOS(K_X,RALT  ), KEY(K_Z       ),
     NO_ACTION,       NO_ACTION,       NO_ACTION,
   },
 };
