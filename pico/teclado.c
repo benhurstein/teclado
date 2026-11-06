@@ -2029,7 +2029,7 @@ static void controller__tapKey(Controller *self, Key *key)
   Action tapAction = action_tapAction(action);
   log(LOG_T, "tap: %s", action_description(&tapAction));
   action_actuate(&tapAction, key, self);
-  //if (oneShot) controller__resetOneShotModifiers(self);
+  if (oneShot) controller__resetOneShotModifiers(self);
 }
 
 static void controller__holdKey(Controller *self, Key *key)
