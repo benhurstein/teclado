@@ -714,6 +714,7 @@ enum holdType action_holdType(Action *self)
 {
   switch (self->action_type) {
     case key_or_mod_action:
+    case key_or_omod_action:
     case str_or_mod_action:
     case once_or_mod_action:
       return modHoldType;
@@ -749,6 +750,8 @@ Action action_tapAction(Action *self)
   switch (self->action_type) {
     case key_or_mod_action:
       return KEY(self->key_or_mod.keycode);
+    case key_or_omod_action:
+      return KEY(self->key_or_mod.keycode);
     case str_or_mod_action:
       return STR(self->str_or_mod.str);
     case key_or_layer_action:
@@ -771,6 +774,8 @@ Action action_holdAction(Action *self)
   switch (self->action_type) {
     case key_or_mod_action:
       return MOD(self->key_or_mod.modifier);
+    case key_or_omod_action:
+      return OMO(self->key_or_mod.modifier);
     case str_or_mod_action:
       return MOD(self->str_or_mod.modifier);
     case key_or_layer_action:
