@@ -367,6 +367,10 @@ typedef enum {
   hold_layer_action,
   once_layer_action,
   lock_layer_action,
+  cmd_action,
+  mouse_move_action,
+  mouse_button_action,
+
   key_or_mod_action,
   key_or_omod_action,
   str_or_mod_action,
@@ -375,9 +379,6 @@ typedef enum {
   str_or_layer_action,
   cmd_or_layer_action,
   once_or_mod_action,
-  mouse_move_action,
-  mouse_button_action,
-  cmd_action,
 
   rel_key_action,
   rel_asc_action,
