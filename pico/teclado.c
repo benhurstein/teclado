@@ -2010,16 +2010,14 @@ void controller_lockLayer(Controller *self, layer_id_t layer)
     // unlock if already locked in same layer
     self->lockLayer = NO_LAYER;
     controller__setCurrentLayer(self, self->baseLayer);
+  } else if (self->changeToLayer != layer) {
+    // mark and wait for second tap
+    self->changeToLayer = layer;
+    timer_enable_ms(&self->changeLayerTimer, LOCK_DELAY_MS);
   } else {
-    if (self->changeToLayer != layer) {
-      // mark and wait for second tap
-      self->changeToLayer = layer;
-      timer_enable_ms(&self->changeLayerTimer, LOCK_DELAY_MS);
-    } else {
-      // lock on second tap
-      self->lockLayer = layer;
-      controller__setCurrentLayer(self, layer);
-    }
+    // lock on second tap
+    self->lockLayer = layer;
+    controller__setCurrentLayer(self, layer);
   }
 }
 
